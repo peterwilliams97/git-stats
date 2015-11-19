@@ -8,6 +8,8 @@ show pandas, numpy, matplotlib versions
 
 
 # TODO
+* path_list -> mask list. Test for file mask[s]
+* Use http://www.pygit2.org/recipes/git-show.html
 * consistent naming. row, column. singular
 * validate dates
 * optimize across different versions. cache by commit
