@@ -3,13 +3,43 @@ Compute and display statistics of git repositories
 
 # Requirements
 Scientific Python distribution such as Anaconda
+
+e.g. Install Anaconda then
+conda update conda
 conda update anaconda
-show pandas, numpy, matplotlib versions
+
+Tested with
+
+    python    : 2.7.5
+    numpy     : 1.9.2
+    matplotlib: 1.4.3
+    pandas    : 0.16.2
+
+# Danger Signs
+* source file with many owners
+* source file with many recent owners
+* source file with much churn
+* author changing many source files
+
 
 
 # TODO
+* separate versions.py file
+* Top level stats
+*   Total # files
+*   Author: Files contributed to
+*   Author: LoC
+*   Get spreadsheet working
+* For each Report: csv of author, LoC, start, end,
+* Add an extensions subdirectory level
+* Add a BlameMap copy constructor + checks that members don't change. BlameMap needs to be immuatabe. Add accessor functions
+* Save pickle as .old.pkl before changing it
+* Trim ends of time series e.g 1% at each end, to remove outliers
+* Reuse data between branches on same repository. commmon commits, diff then blame
+* Make history.txt reflect peaks in history.png better
 * path_list -> mask list. Test for file mask[s]
 * Use http://www.pygit2.org/recipes/git-show.html
+* Install like this: http://www.pygit2.org/install.html#libgit2-within-a-virtual-environment
 * consistent naming. row, column. singular
 * validate dates
 * optimize across different versions. cache by commit
@@ -43,6 +73,7 @@ show pandas, numpy, matplotlib versions
 * Churn by module
 * Source files by age. Mean stddev
 * Warning signs: Code with many authors, recent code, big changes
+* Authors who touch all modules !@#$
 * tf/idf on commit messages
 * Sort files by ownership most owner
 * Ownership vector for each file {auther: frac loc} Do a tf/idf like classidicati
@@ -64,6 +95,15 @@ show pandas, numpy, matplotlib versions
 * unit tests. see what pandas does
 * abspath in error message consistently
 * avoid reblaming files that fail blame. keep a list of blamed files
+* Tests: All modules, major file patterns, all authors
+* Graph percentage of code by age. How?
+* Get on http://github-awards.com/users?utf8=%E2%9C%93&type=city&language=Python&city=Melbourne
+* Trim 0 LoC peaks
+    TODO:
+        hours of day
+        days of week
+        top times
+        group code by functionality
 
 directory structure
 ------------------

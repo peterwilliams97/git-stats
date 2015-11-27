@@ -308,7 +308,7 @@ def git_name():
 def git_current_branch():
     branch = exec_headline(['git', 'rev-parse', '--abbrev-ref', 'HEAD'])
     if branch == 'HEAD': # Detached HEAD?
-        branch = '[None]'
+        branch = None
     return branch
 
 
@@ -719,7 +719,7 @@ def plot_loc_date(ax, label, history, n_peaks=N_PEAKS):
         assert Y0 <= y_t <= Y1, (Y0, y_t, Y1)
 
 
-def plot_show(ax, blame_map, report_map, do_show, graph_path, do_legend):
+def plot_show(ax, blame_map, report_map, author, do_show, graph_path, do_legend):
     """Show and/or save the current markings in axes `ax`
     """
 
@@ -739,12 +739,13 @@ def plot_show(ax, blame_map, report_map, do_show, graph_path, do_legend):
     if do_legend:
         plt.legend(loc='best')
     ax.set_title('%s%s code age (as of %s)\n'
-                 'commit=%s : "%s"' % (
+                 'commit=%s : "%s", author: %s' % (
                  repo_summary['remote_name'],
                  path_str,
-                 rev_summary['date'],
+                 date_str(rev_summary['date']),
                  truncate_hash(rev_summary['commit']),
                  blame_map.get_description(),  # !@#$ name | description
+                 author
                  ))
     ax.set_xlabel('date')
     ax.set_ylabel('LoC / day')
@@ -862,6 +863,10 @@ class BlameMap(object):
         rev_dir = os.path.join(self._repo_map.base_dir, truncate_hash(rev_summary['commit']))
         self._rev_map = BlameRevMap(rev_summary, rev_dir)
 
+        # pprint(self.repo_summary)
+        # pprint(self.rev_summary)
+        # assert False
+
     def load(self):
         self._repo_map.load()
         self._rev_map.load()
@@ -882,8 +887,12 @@ class BlameMap(object):
         return self._rev_map.catalog['path_hash_loc']
 
     def get_description(self):
-        summary = self._rev_map.summary
-        return summary.get('branch', summary['description'])
+        """Our best guess at describing the current revision"""
+        summary = self.rev_summary
+        description = summary.get('branch')
+        if not description:
+            description = summary['description']
+        return description
 
     def get_peer_blames(self, file_list):
         for branch in blame_map.brach_list:
@@ -1369,7 +1378,7 @@ def plot_analysis(blame_map, report_map, history, author, do_show, graph_path):
     plot_loc_date(ax0, label, (ts, peak_idx))
 
     print('plot_analysis: plot')
-    plot_show(ax0, blame_map, report_map, do_show, graph_path, False)
+    plot_show(ax0, blame_map, report_map, author, do_show, graph_path, False)
     print('plot_analysis: after')
 
 
@@ -1421,6 +1430,50 @@ def write_legend(f, author_date_loc, hash_loc, history, date_hash_loc,
     # exit()
 
 
+def write_oldest(f, author, hash_path_loc, date_hash_loc, hash_date_author, n_revisions, n_files):
+    """Write a report of oldest surviving revisions in current revision
+        n_revisions: Max number of revisions to write
+        n_files: Max number of files to write for each revision
+
+        author: Date of oldest revision
+        revision 1: Same format as write_legend
+            file 1: LoC
+            file 2: LoC
+            ...
+        revision 2: ...
+            ...
+    """
+    def put(s):
+        # print(s)
+        f.write('%s\n' % s)
+
+    date_hash_loc = sorted(date_hash_loc, key=lambda dhl: (dhl[0], -dhl[2]))
+    loc_total = sum(loc for _, _, loc in date_hash_loc)
+
+    put('=' * 80)
+    put('%s: %d commits %d LoC' % (author, len(date_hash_loc), loc_total))
+
+    for i, (date, hsh, loc) in enumerate(date_hash_loc[:n_revisions]):
+        put('.' * 80)
+        put('%5d LoC, %s %s' % (loc, date_str(hash_date_author[hsh][0]),
+                git_show_oneline(hsh)))
+
+        path_loc = hash_path_loc[hsh].items()
+        path_loc.sort(key=lambda k: (-k[1], k[0]))
+        # !@#$ compute hash_path_loc from path_hash_loc
+        for j, (path, l) in enumerate(path_loc[:n_files]):
+            put('%5d LoC,   %s' % (l, path))
+
+
+def make_hash_path_loc(path_hash_loc):
+    print('make_hash_path_loc 1: path_hash_loc=%d' % len(path_hash_loc))
+    hash_path_loc = defaultdict(dict)
+    for path, hash_loc in path_hash_loc.items():
+        for hsh, loc in hash_loc.items():
+            hash_path_loc[hsh][path] = loc
+    print('make_hash_path_loc 2: hash_path_loc=%d' % len(hash_path_loc))
+    return hash_path_loc
+
 def save_analysis(blame_map, report_map, analysis, _a_list, do_save, do_show, N_TOP=3):
     """Create a graph (time series + markers)
         a list of commits in for each peak
@@ -1457,13 +1510,20 @@ def save_analysis(blame_map, report_map, analysis, _a_list, do_save, do_show, N_
     if do_save:
         graph_name = 'history%s.png' % report_name
         legend_name = 'history%s.txt' % report_name
+        oldest_name = 'oldest%s.txt' % report_name
         graph_path = os.path.join(reports_dir, graph_name)
         legend_path = os.path.join(reports_dir, legend_name)
+        oldest_path = os.path.join(reports_dir, oldest_name)
         print('graph_path="%s"' % graph_path)
         print('legend_path="%s"' % legend_path)
+        print('oldest_path="%s"' % oldest_path)
+        hash_path_loc = make_hash_path_loc(blame_map.path_hash_loc)
         with open(legend_path, 'wt') as f:
             write_legend(f, author_date_loc, hash_loc, history, date_hash_loc,
                          hash_date_author, author, N_TOP)
+        with open(oldest_path, 'wt') as f:
+            write_oldest(f, author, hash_path_loc, date_hash_loc, hash_date_author, n_revisions=50,
+                         n_files=3)
     else:
         graph_path = None
 
@@ -1523,6 +1583,8 @@ def main(path_list, force, author_pattern, ext_pattern, do_save, do_show):
     file_list = git_file_list(path_list)
 
     blame_map = BlameMap(repo_summary, rev_summary)
+    # print(blame_map.get_description())
+    # assert False
     if not force:
         blame_map.load()
     changed = blame_map.update(file_list)
@@ -1561,6 +1623,8 @@ def main(path_list, force, author_pattern, ext_pattern, do_save, do_show):
     print('rev_dir=%s' % os.path.abspath(rev_dir))
     for reports_dir_author in reports_dir_list:
         print('reports_dir=%s' % reports_dir_author)
+
+    print(blame_map.get_description())
 
 
 if __name__ == '__main__':
