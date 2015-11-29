@@ -105,4 +105,8 @@ git.stats\
 
 # References
 http://cse.unl.edu/~elbaum/papers/conferences/icsm98.pdf
+https://www.google.com.au/webhp?sourceid=chrome-instant&ion=1&espv=2&es_th=1&ie=UTF-8#q=git-stats&es_th=1
+
+https://github.com/gfxmonk/autonose
+https://developer.github.com/v3/repos/statistics/
 

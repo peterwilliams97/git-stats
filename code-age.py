@@ -1,29 +1,40 @@
-from __future__ import division, print_function
+# -*- coding: utf-8 -*-
 """
     Analyze code age in a git repository
 
-    Key Data Structures
-    -------------------
-    manifest_dict: Full manifest of data files used by this script
-    hash_loc: {hsh: loc} over all hashes
-    hash_date_author: {hsh: (date, author)} over all hashes  !@#$ Combine with hash_loc
-    author_date_hash_loc: {author: [(date, hsh, loc)]} over all authors.
-                          [(date, hsh, loc)]  over all author's commits
-    author_stats: {author: (loc, (min date, max date), #days, ratio)} over authors
-                   ratio = loc / #days
-    author_history: {author: (ts, peaks)} over all authors
-    author_list: sorted list of authors. !@#$ Not needed. Sort with key based on author_stats
+    Writes reports in the following locations
 
-    References
-    ----------
-    git log --pretty=oneline -S'PDL'
-    http://stackoverflow.com/questions/8435343/retrieve-the-commit-log-for-a-specific-line-in-a-file
+    e.g. For repository "Linux"
 
-    http://stackoverflow.com/questions/4082126/git-log-of-a-single-revision
-    git log -1 -U
 
+    [root]
+        │
+        ├── linux
+        │   └── reports
+        │       └── 2015-11-25.6ffeba96
+        │           ├── __sh
+        │           │   ├── Adrian_Hunter
+        │           │   │   ├── history[all].png
+        │           │   │   ├── history[all].txt
+        │           │   │   └── oldest[all].txt
+        │           │   ├── Akinobu_Mita
+        │           │   │   ├── history[all].png
+        │           │   │   ├── history[all].txt
+        │           │   │   └── oldest[all].txt
+
+
+
+    _[root]_ defaults to ~/git.stats
+    _"linux"_ is the remote name of the repository being analyzed. It was extracted from
+            https://github.com/torvalds/linux.git
+    _"2015-11-25.6ffeba96"_ contains reports on revision 6ffeba96. 6ffeba96 was
+            created on 2015-11-25. We hope that putting the date in the directory name makes it
+            easier to navigate.
+    _"__sh"_ is the directory containing reports on *.sh files
+    _Adrian_Hunter_ is the directory containing reports on author Adrian_Hunter files in revision 6ffeba96
 
 """
+from __future__ import division, print_function
 import subprocess
 from collections import defaultdict, Counter
 import sys
@@ -38,8 +49,28 @@ from pandas import Series, DataFrame, Timestamp
 import matplotlib
 import matplotlib.pylab as plt
 from pprint import pprint
-import copy
+reload(sys)
+sys.setdefaultencoding("utf-8")
 
+ # Key Data Structures
+ #    -------------------
+ #    manifest_dict: Full manifest of data files used by this script
+ #    hash_loc: {hsh: loc} over all hashes
+ #    hash_date_author: {hsh: (date, author)} over all hashes  !@#$ Combine with hash_loc
+ #    author_date_hash_loc: {author: [(date, hsh, loc)]} over all authors.
+ #                          [(date, hsh, loc)]  over all author's commits
+ #    author_stats: {author: (loc, (min date, max date), #days, ratio)} over authors
+ #                   ratio = loc / #days
+ #    author_history: {author: (ts, peaks)} over all authors
+ #    author_list: sorted list of authors. !@#$ Not needed. Sort with key based on author_stats
+
+ #    References
+ #    ----------
+ #    git log --pretty=oneline -S'PDL'
+ #    http://stackoverflow.com/questions/8435343/retrieve-the-commit-log-for-a-specific-line-in-a-file
+
+ #    http://stackoverflow.com/questions/4082126/git-log-of-a-single-revision
+ #    git log -1 -U
 
 #
 # Configuration
@@ -51,11 +82,9 @@ N_PEAKS = 50
 
 # Set graphing style
 matplotlib.style.use('ggplot')
-plt.rcParams['axes.color_cycle'] = ['b', 'y', 'k', '#707040', '#404070'] + plt.rcParams['axes.color_cycle'][1:]
-
-print(plt.rcParams['savefig.dpi'])
+plt.rcParams['axes.color_cycle'] = ['b', 'y', 'k', '#707040', '#404070'] +\
+                                    plt.rcParams['axes.color_cycle'][1:]
 plt.rcParams['savefig.dpi'] = 300
-print(plt.rcParams['savefig.dpi'])
 
 
 IGNORED_EXTS = {
@@ -83,13 +112,6 @@ GUILD_EXT = {
 }
 
 EXT_GUILD = {ext: gld for gld, extensions in GUILD_EXT.items() for ext in extensions}
-
-
-def show_versions():
-    print('python    : %s.%s.%s' % sys.version_info[:3])
-    print('numpy     : %s' % np.__version__)
-    print('matplotlib: %s' % matplotlib.__version__)
-    print('pandas    : %s '% pd.__version__)
 
 
 def is_windows():
@@ -124,6 +146,11 @@ def truncate_hash(hsh):
 def date_str(date):
     """The way we show dates"""
     return date.strftime('%Y-%m-%d')
+
+DAY = pd.Timedelta('1 days')  # 24 * 3600 * 1e9
+
+# Max date accepted for commits. Clearly a sanity check
+MAX_DATE = Timestamp('today').tz_localize(TIMEZONE) + DAY
 
 
 def to_timestamp(date_s):
@@ -172,7 +199,6 @@ def load_object(path, default=None):
 def mkdir(path):
     """Create directory dir and ignore already exists errors
     """
-    print('mkdir: path="%s"' % path)  # !@#$ remove
     try:
         os.makedirs(path)
     except OSError as e:
@@ -258,8 +284,8 @@ def exec_headline(command):
     return exec_output(command, True).splitlines()[0]
 
 
-def git_file_list(path_list=()):
-    return exec_output_lines(['git', 'ls-files'] + path_list, False)
+def git_file_list(path_patterns=()):
+    return exec_output_lines(['git', 'ls-files'] + path_patterns, False)
 
 
 def git_show_oneline(obj):
@@ -273,7 +299,8 @@ def git_date(obj):
     return to_timestamp(date_s)
 
 
-RE_REMOTE_URL =  re.compile(r'(https?://.*/[^/]+(?:\.git)?)\s+\(fetch\)')
+RE_REMOTE_URL = re.compile(r'(https?://.*/[^/]+(?:\.git)?)\s+\(fetch\)')
+
 RE_REMOTE_NAME = re.compile(r'https?://.*/(.+?)(\.git)?$')
 
 
@@ -296,7 +323,10 @@ def git_remote():
 
 
 def git_describe():
-    return exec_headline(['git', 'describe'])
+    try:
+        return exec_headline(['git', 'describe'])
+    except:
+        return None
 
 
 def git_name():
@@ -307,7 +337,7 @@ def git_name():
 
 def git_current_branch():
     branch = exec_headline(['git', 'rev-parse', '--abbrev-ref', 'HEAD'])
-    if branch == 'HEAD': # Detached HEAD?
+    if branch == 'HEAD':  # Detached HEAD?
         branch = None
     return branch
 
@@ -318,6 +348,7 @@ def git_current_commit():
 
 RE_PATH = re.compile('''[^a-z^0-9^!@#$\-+=_\[\]\{\}\(\)]''', re.IGNORECASE)
 RE_SLASH = re.compile(r'[\\/]+')
+
 
 def normalize_path(path):
     path = RE_SLASH.sub('/', path)
@@ -335,32 +366,18 @@ def clean_path(path):
 def git_blame_text(path):
     """Return git blame text for file `path`
     """
-    # https://coderwall.com/p/x8xbnq/git-don-t-blame-people-for-changing-whitespaces-or-moving-code
-    # -l for long hashes
-    assert os.path.exists(path), path
-    try:
-        return exec_output(['git', 'blame', '-l', '-f', '-w', '-M', path], False)
-    except Exception as e:
-        # !@#$ Get stderr from exec_output
-        print('git_blame_text:\n\tpath=%s\n\te=%s' % (path, e), file=sys.stderr)
-        raise
+    return exec_output(['git', 'blame', '-l', '-f', '-w', '-M', path], False)
+
 
 RE_BLAME = re.compile(r'''
-    \^*([0-9a-f]{4,})\s+
-    .+?\s+
-    \(
-    (.+?)\s+
-    (\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\s+[+-]\d{4})
-    \s+(\d+)
-    \)''',
-    re.DOTALL | re.MULTILINE | re.VERBOSE)
-if False:
-    text = r'7aa60cb5 (Peter Williams 2013-09-03 04:13:46 +0000   1) #! /bin/sh'
-    m = RE_BLAME.search(text)
-    print(m.groups())
-    exit()
-
-MAX_DATE = Timestamp('2015-12-22 14:11:54 -0700') # !@#$ Now
+                      \^*([0-9a-f]{4,})\s+
+                      .+?\s+
+                      \(
+                      (.+?)\s+
+                      (\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\s+[+-]\d{4})
+                      \s+(\d+)
+                      \)''',
+                      re.DOTALL | re.MULTILINE | re.VERBOSE)
 
 
 def get_text_hash_loc(hash_date_author, path_hash_loc, path_set, author_set, ext_set,
@@ -370,16 +387,15 @@ def get_text_hash_loc(hash_date_author, path_hash_loc, path_set, author_set, ext
 
     if max_date is None:
         max_date = MAX_DATE
-    else:
-        assert max_date < MAX_DATE, max_date
+
+    assert max_date <= MAX_DATE, max_date
 
     hash_loc = Counter()
     for i, ln in enumerate(text.splitlines()):
         m = RE_BLAME.match(ln)
         if not m:
-            print('    Bad file: "%s"' % path)
+            print('    Bad file: "%s"' % path, file=sys.stderr)
             return None
-        assert m, (path, i, len(ln), ln[:200])
         if m.group(2) == 'Not Committed Yet':
             continue
         hsh = m.group(1)
@@ -394,14 +410,13 @@ def get_text_hash_loc(hash_date_author, path_hash_loc, path_set, author_set, ext
             author = '<>'
 
         assert line_n == i + 1, 'line_n=%d,i=%d\n%s\n%s' % (line_n, i, path, m.group(0))
-        assert author.strip() == author, 'author="%s\n%s:%d\n%s",' % (author, path, i + 1, ln[:200])
+        assert author.strip() == author, 'author="%s\n%s:%d\n%s",' % (
+                  author, path, i + 1, ln[:200])
 
-        date = Timestamp(date_s)
-        date = date.tz_convert('Australia/Melbourne')
-        # assert date <= max_date
+        date = to_timestamp(date_s)
 
         if date > max_date:
-            print('Bogus timestamp: %s:%d\n%s' % (path, i + 1, ln[:200]))
+            print('Bogus timestamp: %s:%d\n%s' % (path, i + 1, ln[:200]), file=sys.stderr)
             continue
 
         hash_loc[hsh] += 1
@@ -448,23 +463,6 @@ def ext_to_guild(df_author_ext):
     return df_author_guild
 
 
-def print_counts(title, counter):
-    """Debug code for counters !@#$
-    """
-    if counter:
-        max_klen = max(len(k) for k in counter.keys())
-        max_vlen = max(len(str(v)) for v in counter.values())
-        # print('!@', max_klen, max_vlen)
-    total = sum(counter.values())
-
-    print('-' * 80)
-    print('%s : number=%d,total=%d' % (title, len(counter), total))
-    if counter:
-        for name, count in counter.most_common():
-            print('%s %s %4.1f%%' % (name.ljust(max_klen), str(count).rjust(max_vlen),
-                  count / total * 100.0))
-
-
 def ts_summary(ts, desc=None):
     """Return a summary of time series `ts`
     """
@@ -478,9 +476,9 @@ def ts_summary(ts, desc=None):
 
     return ('min=%.1f,max=%.1f=%.2f,median=%.1f,mean=%.1f=%.2f,'
             '[tmin,argmax,tmax]=%s' % (
-            ts.min(), ts.max(), ts.max() / ts.sum(),
-            ts.median(), ts.mean(), ts.mean() / ts.sum(),
-            ','.join([date_str(t) for t in (ts.index[0], ts.argmax(), ts.index[-1])])
+             ts.min(), ts.max(), ts.max() / ts.sum(),
+             ts.median(), ts.mean(), ts.mean() / ts.sum(),
+             ','.join([date_str(t) for t in (ts.index[0], ts.argmax(), ts.index[-1])])
             ))
 
 
@@ -500,6 +498,7 @@ def find_peaks(ts):
                 ]
     return peak_idx
 
+
 #
 # Time series analysis
 #  !@#$ try different windows to get better peaks
@@ -513,7 +512,7 @@ def __analyze_time_series(loc, date, window=60):
     # ts is histogram of LoC with 1 day bins. bins start at midnight on TIMEZONE
     # !@#$ maybe offset dates in ts to center of bin (midday)
 
-    ts = Series(loc, index=date) # !@#$ dates may not be unique, guarantee this
+    ts = Series(loc, index=date)  # !@#$ dates may not be unique, guarantee this
     ts_days = ts.resample('D', how='mean')  # Day
     ts_days = ts_days.fillna(0)
 
@@ -543,9 +542,6 @@ def make_history(author_date_loc, author_list=None):
         loc.extend(l)
     # assert delta_days(min(date), max(date)) > 30, (author, min(date), max(date))
     ts, peak_idx = __analyze_time_series(loc, date)
-    # print('make_history: ts=%s' % ts_summary(ts, author_list))
-
-    assert ts.index.max() <= MAX_DATE
 
     peak_pxy = [(p, ts.index[p], ts.iloc[p]) for p in peak_idx]
 
@@ -556,6 +552,10 @@ def make_history(author_date_loc, author_list=None):
     peak_ixy = [(i, x, y) for i, (p, x, y) in enumerate(peak_pxy)]
 
     return ts, tuple(peak_ixy)
+
+
+def key_ixy_i(i, x, y):
+    return i
 
 
 def key_ixy_x(i, x, y):
@@ -584,9 +584,9 @@ def _get_xy_text(xy_plot, txt_width, txt_height):
     for i, (y, x) in enumerate(yx_plot):
         # yx_collisions is all points that collide with yx_plot[i], lowest first
         yx_collisions = sorted((yy, xx) for yy, xx in yx_plot
-                               if yy > y - txt_height
-                               and abs(xx - x) < txt_width * 2
-                               and (yy, xx) != (y, x))
+                               if yy > y - txt_height and
+                               abs(xx - x) < txt_width * 2 and
+                               (yy, xx) != (y, x))
         if not yx_collisions or abs(yx_collisions[0][0] - y) >= txt_height:
             continue
 
@@ -594,7 +594,7 @@ def _get_xy_text(xy_plot, txt_width, txt_height):
 
         # Search for lowest space between collisions that is big enough for text
         for j, (dy, dx) in enumerate(np.diff(yx_collisions, axis=0)):
-            if dy > txt_height * 2: # Room for text?
+            if dy > txt_height * 2:  # Room for text?
                 yx_plot[i][0] = yx_collisions[j][0] + txt_height
                 break
         else:
@@ -613,56 +613,40 @@ def _get_xy_text(xy_plot, txt_width, txt_height):
             if y == y0:
                 continue
             yx_collisions = sorted((yy, xx) for yy, xx in yx_plot
-                                   if y0 - txt_height <= yy < y + txt_height
-                                   and abs(xx - x) < txt_width * 2
-                                   and (yy, xx) != (y, x))
+                                   if y0 - txt_height <= yy < y + txt_height and
+                                   abs(xx - x) < txt_width * 2 and
+                                   (yy, xx) != (y, x))
             if not yx_collisions:
                 yx_plot[i][0] = y0
                 changed = True
                 n_changes += 1
-                print('@@1', n, i)
+
             elif yx_collisions[0][0] > y0 + txt_height * 2:
                 yx_plot[i][0] = y0
                 changed = True
                 n_changes += 1
-                print('@@2', n, i)
+
             else:
                 yx_collisions2 = [(y0, x0)] + yx_collisions + [(y, x)]
                 for j, (dy, dx) in enumerate(np.diff(yx_collisions2, axis=0)):
-                    if dy > txt_height * 2: # Room for text?
+                    if dy > txt_height * 2:  # Room for text?
                         yx_plot[i][0] = yx_collisions2[j][0] + txt_height
                         changed = True
                         n_changes += 1
-                        print('@@3', n, i)
+
                         break
             if not changed and y > yx_collisions[-1][0] + 2 * txt_height:
                 yx_plot[i][0] = yx_collisions[-1][0] + 2 * txt_height
                 changed = True
                 n_changes += 1
-                print('@@4', n, i)
 
-        print('**** n=%d,n_changes=%d,changed=%s' % (n, n_changes, changed))
+        # print('**** n=%d,n_changes=%d,changed=%s' % (n, n_changes, changed))
         for i, ((y0, x0), (y, x), (y1, x1)) in enumerate(zip(yx_plot0, yx_plot, yx_plot1)):
             assert y0 <= y <= y1, (y0, y, y1)
         if not changed:
             break
-        # if all(y == y1 for (y, x), (y1, x1) in zip(yx_plot, yx_plot1)):
-        #     break
 
-    # assert n == 1  # !@#$
     return [(x, y) for y, x in yx_plot]
-
-
-def get_peak_coords(history):
-    tsm, peak_idx = history
-    assert tsm.index.max() <= MAX_DATE
-    xy_data = [(tsm.index[idx], tsm.iloc[idx]) for idx in peak_idx[:n_peaks]]
-
-    def key_plot(x, y):
-        return -y, x
-
-    xy_data.sort(key=lambda k: key_plot(*k))
-    return xy_data
 
 
 def plot_loc_date(ax, label, history, n_peaks=N_PEAKS):
@@ -670,16 +654,9 @@ def plot_loc_date(ax, label, history, n_peaks=N_PEAKS):
     """
     # TODO Show areas !@#$
     tsm, peak_ixy = history
-    assert tsm.index.max() <= MAX_DATE
-
-    # print('plot_loc_date: %s' % ts_summary(tsm))
-
     tsm.plot(label=label, ax=ax)
 
     X0, X1, Y0, Y1 = ax.axis()
-    print('***plot_loc_date:', ax.axis(), X1 - X0, len(peak_ixy), n_peaks)
-    DX = (X1 - X0) / 50 #  5
-    DY = (Y1 - Y0) / 15 # 10
 
     if not peak_ixy:
         return
@@ -692,14 +669,10 @@ def plot_loc_date(ax, label, history, n_peaks=N_PEAKS):
 
     # NOTE: The following code assumes xy_data is sorted by y
 
-    xy_plot = [(delta_days(x0, x) + X0, y ) for _, x, y in peak_ixy]
-
-    print('txt_width=%.1f,txt_height=%.1f' % (txt_width, txt_height))
-
+    xy_plot = [(delta_days(x0, x) + X0, y) for _, x, y in peak_ixy]
     xy_text = _get_xy_text(xy_plot, txt_width, txt_height)
     plt.ylim(plt.ylim()[0], max(plt.ylim()[1], max(y for _, y in xy_text) + 2 * txt_height))
     X0, X1, Y0, Y1 = ax.axis()
-    print('**!plot_loc_date:', ax.axis(), X1 - X0)
 
     # Write high labels first so that lower label text overwrites higher label arrows
     def key_text((i, x, y), (x_p, y_p), (x_t, y_t)):
@@ -724,28 +697,27 @@ def plot_show(ax, blame_map, report_map, author, do_show, graph_path, do_legend)
     """
 
     X0, X1, Y0, Y1 = ax.axis()
-    print('*!*plot_show:', ax.axis(), X1 - X0)
 
     repo_summary = blame_map._repo_map.summary
     rev_summary = blame_map._rev_map.summary
-    path_list = report_map.path_list
+    path_patterns = report_map.path_patterns
 
     path_str = ''
-    if len(path_list) == 1:
-        path_str = '/%s' % path_list[0]
-    elif len(path_list) > 1:
-        path_str = '/[%s]' % '|'.join(path_list)
+    if len(path_patterns) == 1:
+        path_str = '/%s' % path_patterns[0]
+    elif len(path_patterns) > 1:
+        path_str = '/[%s]' % '|'.join(path_patterns)
 
     if do_legend:
         plt.legend(loc='best')
     ax.set_title('%s%s code age (as of %s)\n'
                  'commit=%s : "%s", author: %s' % (
-                 repo_summary['remote_name'],
-                 path_str,
-                 date_str(rev_summary['date']),
-                 truncate_hash(rev_summary['commit']),
-                 blame_map.get_description(),  # !@#$ name | description
-                 author
+                  repo_summary['remote_name'],
+                  path_str,
+                  date_str(rev_summary['date']),
+                  truncate_hash(rev_summary['commit']),
+                  blame_map.get_description(),
+                  author
                  ))
     ax.set_xlabel('date')
     ax.set_ylabel('LoC / day')
@@ -754,7 +726,6 @@ def plot_show(ax, blame_map, report_map, author, do_show, graph_path, do_legend)
     if do_show:
         plt.show()
         assert False
-    print('shown')
 
 
 def make_data_dir(path):
@@ -803,7 +774,7 @@ class Persistable(object):
         assert os.path.exists(path), os.path.abspath(path)
 
         manifest = {k: len(v) for k, v in self.catalog.items()}
-        path = self.make_path('manfiest')
+        path = self.make_path('manifest')
         open(os.path.join(path), 'wt').write(repr(manifest))
         assert os.path.exists(path), os.path.abspath(path)
 
@@ -820,25 +791,20 @@ class BlameRepoMap(Persistable):
 
 class BlameRevMap(Persistable):
     """Revision level persisted data structures
-        The main stucture is path_hash_loc.
+        The main structure is path_hash_loc.
     """
-    # !@#$ don;t need extensions
-    # pickle and zip catalog !@#$
-    DICT = lambda: {}
-    COUNT = lambda: Counter()
-    SET = lambda: set()
 
     TEMPLATE = {
-        'path_hash_loc': DICT,
-        'path_set': SET,
-        'author_set': SET,
-        'ext_set': SET,
+        'path_hash_loc': lambda: {},
+        'path_set': lambda: set(),
+        'author_set': lambda: set(),
+        'ext_set': lambda: set(),
 
-        # optional
-        'exts_good': COUNT,
-        'exts_good_loc': COUNT,
-        'exts_bad': COUNT,
-        'exts_ignored': COUNT,
+        # derived
+        'exts_good': lambda: Counter(),
+        'exts_good_loc': lambda: Counter(),
+        'exts_bad': lambda: Counter(),
+        'exts_ignored': lambda: Counter(),
     }
 
 
@@ -848,24 +814,13 @@ class BlameMap(object):
         disk so that it can be reused between runs
     """
 
-    # git.stats directory layout
-    # root\             ~/git.stats/
-    #   repo\           ~/git.stats/papercut
-    #     rev\          ~/git.stats/papercut/2015-11-16.3f4632c6
-    #       reports\    ~/git.stats/papercut/2015-11-16.3f4632c6/reports/tools_page-analysis-tools
-    root_dir = os.path.join(os.path.expanduser('~'), 'git.stats')
-
-    def __init__(self, repo_summary, rev_summary):
+    def __init__(self, repo_base_dir, repo_summary, rev_summary):
         self.repo_summary = repo_summary
         self.rev_summary = rev_summary
-        repo_dir = os.path.join(self.__class__.root_dir, repo_summary['remote_name'])
+        repo_dir = os.path.join(repo_base_dir, 'cache')
         self._repo_map = BlameRepoMap(repo_summary, repo_dir)
         rev_dir = os.path.join(self._repo_map.base_dir, truncate_hash(rev_summary['commit']))
         self._rev_map = BlameRevMap(rev_summary, rev_dir)
-
-        # pprint(self.repo_summary)
-        # pprint(self.rev_summary)
-        # assert False
 
     def load(self):
         self._repo_map.load()
@@ -894,18 +849,18 @@ class BlameMap(object):
             description = summary['description']
         return description
 
-    def get_peer_blames(self, file_list):
-        for branch in blame_map.brach_list:
-            diff_list = git_diff(current_branch, branch)
-            file_list = file_list - diff_list
-            common_blame = file_list & branch.path_set
-            for path in common_blame:
-                path_hash_loc[path] = branch.path_hash_loc[path]
-                path_set.add(path)
+    # def get_peer_blames(self, file_list):
+    #     for branch in blame_map.branch_list:
+    #         diff_list = git_diff(current_branch, branch)
+    #         file_list = file_list - diff_list
+    #         common_blame = file_list & branch.path_set
+    #         for path in common_blame:
+    #             path_hash_loc[path] = branch.path_hash_loc[path]
+    #             path_set.add(path)
 
     def update(self, file_list):
         """Compute base statistics over whole repository:hash
-            blame all files in `path_list`
+            blame all files in `path_patterns`
             Update: hash_date_author, path_hash_loc for files that are not already in path_hash_loc
 
             Also update exts_good, exts_good_loc, exts_bad, exts_ignored
@@ -918,7 +873,6 @@ class BlameMap(object):
 
         path_hash_loc = self._rev_map.catalog['path_hash_loc']
         exts_good = self._rev_map.catalog['exts_good']
-        exts_good_loc = self._rev_map.catalog['exts_good_loc']
         exts_bad = self._rev_map.catalog['exts_bad']
         exts_ignored = self._rev_map.catalog['exts_ignored']
 
@@ -961,7 +915,7 @@ class BlameMap(object):
                 continue
 
             try:
-                max_date=rev_summary['date']
+                max_date = rev_summary['date']
                 text = git_blame_text(path)
                 get_text_hash_loc(hash_date_author, path_hash_loc, path_set, author_set, ext_set,
                                   text, path, max_date)
@@ -970,6 +924,10 @@ class BlameMap(object):
                     print('%s no longer exists' % path, file=sys.stderr)
                     exts_bad[ext] += 1
                     continue
+                if os.path.isdir(path):
+                    print('%s is a directory' % path, file=sys.stderr)
+                    continue
+
                 raise
 
             exts_good[ext] += 1
@@ -987,8 +945,8 @@ class BlameMap(object):
         return len(path_set) > paths0
 
 
-def none_len(n, o):
-    """Debugging code for checkking args
+def __none_len(n, o):
+    """Debugging code for checking args
     !@#$ Remove
     """
     assert o is None or isinstance(o, set), (n, type(o))
@@ -1004,18 +962,18 @@ def none_len(n, o):
 
 
 def _filter_list(s_list, pattern):
-    print('_filter_list', len(s_list), pattern, end=' : ')
+    # print('_filter_list', len(s_list), pattern, end=' : ')
     if pattern is None:
-        print(None)
+        # print(None)
         return None
     regex = re.compile(pattern, re.IGNORECASE)
     res = {s for s in s_list if regex.search(s)}
-    print(len(res), sorted(res)[:10])
+    # print(len(res), sorted(res)[:10])
     return res
 
 
 def filter_path_hash_loc(blame_map, path_hash_loc, file_list=None, author_list=None, ext_list=None):
-    """Trim  `path_hash_loc` down to files in `file_list` authors in `author_list` and extensions
+    """Trim `path_hash_loc` down to files in `file_list` authors in `author_list` and extensions
         in `ext_list'
         Note: Does NOT modify path_hash_loc
         # TODO: inplace?
@@ -1033,15 +991,15 @@ def filter_path_hash_loc(blame_map, path_hash_loc, file_list=None, author_list=N
     if author_list is not None:
         author_list = set(author_list)
 
-    print('filter_path_hash_loc 1: hash_date_author=%d,path_hash_loc=%d=%d' % (
-          len(hash_date_author),
-          len(path_hash_loc), sum(sum(v.values()) for v in path_hash_loc.values()) ))
-    print('file_list,author_list,ext_list=%s' %
-          [none_len(n, o) for n, o in ('file_list', file_list),
-                                   ('author_list', author_list),
-                                   ('ext_list', ext_list)])
-    if author_list is not None:
-        print('author_list: %d %s' % (len(author_list), sorted(author_list)[:10]))
+    # print('filter_path_hash_loc 1: hash_date_author=%d,path_hash_loc=%d=%d' % (
+    #       len(hash_date_author),
+    #       len(path_hash_loc), sum(sum(v.values()) for v in path_hash_loc.values()) ))
+    # print('file_list,author_list,ext_list=%s' %
+    #       [__none_len(n, o) for n, o in ('file_list', file_list),
+    #                                ('author_list', author_list),
+    #                                ('ext_list', ext_list)])
+    # if author_list is not None:
+    #     print('author_list: %d %s' % (len(author_list), sorted(author_list)[:10]))
 
     if ext_list is not None:
         assert isinstance(ext_list, set), type(ext_list)
@@ -1053,27 +1011,27 @@ def filter_path_hash_loc(blame_map, path_hash_loc, file_list=None, author_list=N
                             (not ext_list or get_ext(path) in ext_list)
                          }
 
-    print('filter_path_hash_loc 2: hash_date_author=%d,path_hash_loc=%d=%d' % (
-          len(hash_date_author),
-          len(path_hash_loc), sum(sum(v.values()) for v in path_hash_loc.values()) ))
+    # print('filter_path_hash_loc 2: hash_date_author=%d,path_hash_loc=%d=%d' % (
+    #       len(hash_date_author),
+    #       len(path_hash_loc), sum(sum(v.values()) for v in path_hash_loc.values()) ))
 
     if author_list:
         author_list = set(author_list)
         hash_set = {hsh for hsh, (_, author) in hash_date_author.items() if author in author_list}
         path_hash_loc = {path: {hsh: loc for hsh, loc in hash_loc.items() if hsh in hash_set}
-                         for path, hash_loc in path_hash_loc.items() }
+                         for path, hash_loc in path_hash_loc.items()}
 
-    print('filter_path_hash_loc 3: hash_date_author=%d,path_hash_loc=%d=%d' % (
-          len(hash_date_author),
-          len(path_hash_loc), sum(sum(v.values()) for v in path_hash_loc.values()) ))
-    current_authors = {a for _, a in hash_date_author.values()}
+    # print('filter_path_hash_loc 3: hash_date_author=%d,path_hash_loc=%d=%d' % (
+    #       len(hash_date_author),
+    #       len(path_hash_loc), sum(sum(v.values()) for v in path_hash_loc.values()) ))
+    # current_authors = {a for _, a in hash_date_author.values()}
 
-    def xxx(lst):
-        if lst is None: return None
-        return len(lst), sorted(lst)
+    # def xxx(lst):
+    #     if lst is None: return None
+    #     return len(lst), sorted(lst)
 
-    print('author_list    :', xxx(author_list))
-    print('current_authors:', xxx(current_authors))
+    # print('author_list    :', xxx(author_list))
+    # print('current_authors:', xxx(current_authors))
 
     all_authors = {a for _, a in blame_map.hash_date_author.values()}
     assert all_authors == all_authors0, (all_authors, all_authors0)
@@ -1086,7 +1044,7 @@ class ReportMap(object):
         filter day, write reports and plot graphs so they _should_ be fast
     """
 
-    def __init__(self, blame_map, path_hash_loc, path_list, reports_dir, file_list, author_pattern,
+    def __init__(self, blame_map, path_hash_loc, path_patterns, reports_dir, file_list, author_pattern,
         ext_pattern, author_list=None):
         # assert isinstance(catalog, dict), type(catalog)
         assert author_pattern is None or isinstance(author_pattern, str), author_pattern
@@ -1106,15 +1064,15 @@ class ReportMap(object):
 
         self.ext_list = _filter_list(exts, ext_pattern)
 
-        path_hash_loc = filter_path_hash_loc(blame_map, path_hash_loc, file_list, self.author_list, self.ext_list)
+        path_hash_loc = filter_path_hash_loc(blame_map, path_hash_loc, file_list, self.author_list,
+                                             self.ext_list)
 
-        print('self.author_list:', self.author_list)
-        print('self.ext_list:', self.ext_list)
+        print('self.author_list=%s,self.ext_list=%s' % (self.author_list, self.ext_list))
         # print('self.blame_map:', self.blame_map)
 
         assert ':' not in reports_dir[2:], reports_dir
         self.reports_dir = reports_dir
-        self.path_list = path_list
+        self.path_patterns = path_patterns
 
         all_authors = {a for _, a in blame_map.hash_date_author.values()}
         assert all_authors == all_authors0, (all_authors, all_authors0)
@@ -1122,7 +1080,7 @@ class ReportMap(object):
 
 
 def save_tables(blame_map, report_map):
-    print('save_tables')
+    # print('save_tables')
     reports_dir = report_map.reports_dir
     hash_date_author = blame_map.hash_date_author
     path_hash_loc = blame_map.path_hash_loc
@@ -1136,13 +1094,15 @@ def save_tables(blame_map, report_map):
         return False
 
     if False:
-        df_ext_author_files, df_ext_author_loc = derive_blame(path_hash_loc, hash_date_author, exts_good)
+        df_ext_author_files, df_ext_author_loc = derive_blame(path_hash_loc, hash_date_author,
+                                                              exts_good)
 
         df_guild_author_files = ext_to_guild(df_ext_author_files)
         df_guild_author_loc = ext_to_guild(df_ext_author_loc)
         # print_counts('exts_good', exts_good)
 
-        print('save_tables: hash_date_author=%d,path_hash_loc=%d' % (len(hash_date_author), len(path_hash_loc)))
+        print('save_tables: hash_date_author=%d,path_hash_loc=%d' % (
+              len(hash_date_author), len(path_hash_loc)))
 
         exts = [(k, v, exts_good_loc.get(k, -1)) for k, v in exts_good.items()]
         b_exts = exts_bad.items()
@@ -1181,11 +1141,10 @@ def get_top_authors(blame_map, report_map):
     hash_date_author = blame_map.hash_date_author
     path_hash_loc = report_map.path_hash_loc
 
-    print('get_top_authors: 2')
+    # print('get_top_authors: 2')
     # hash_loc = {hsh: loc} over all hashes
     author_loc_dates = defaultdict(lambda: [0, DATE_INF_POS, DATE_INF_NEG])
     i = 0
-    t0 = time.time()
     for h_l in path_hash_loc.values():
         for hsh, loc in h_l.items():
             date, author = hash_date_author[hsh]
@@ -1194,18 +1153,9 @@ def get_top_authors(blame_map, report_map):
             loc_dates[0] += loc
             loc_dates[1] = min(loc_dates[1], date)
             loc_dates[2] = max(loc_dates[2], date)
-
-            if i % 20000 == 0:
-                dt = time.time() - t0
-                if dt:
-                    print('%8d, %5.1f sec, %.1f items/sec' % (
-                          i, dt, i /dt))
             i += 1
 
     assert author_loc_dates
-    print('get_top_authors: 2')
-    # pprint(author_loc_dates)
-
     return author_loc_dates, sorted(author_loc_dates.keys(), key=lambda a: -author_loc_dates[a][0])
 
 
@@ -1216,8 +1166,6 @@ def analyze_blame(blame_map, report_map):
     hash_date_author = blame_map.hash_date_author
     path_hash_loc = report_map.path_hash_loc
 
-    print('analyze_blame: 1')
-
     # dates = dates of all commits
     dates = [date for date, _ in hash_date_author.values()]
 
@@ -1227,19 +1175,10 @@ def analyze_blame(blame_map, report_map):
         for hsh, loc in h_l.items():
             hash_loc[hsh] += loc
 
-    print('analyze_blame: 1a')
-
-    # hsh_by_loc = sorting key for hash_loc  rename to key_loc
-    hsh_by_loc = sorted(hash_loc.keys(), key=lambda k: hash_loc[k])
-    total = sum(hash_loc.values())
-
     # Populate the following dicts
     author_loc = Counter()              # {author: loc}
     author_dates = {}                   # {author: (min date, max date)}
     author_date_hash_loc = {}           # {author: [(date, hsh, loc)]}
-
-    print('analyze_blame: 1b: hash_loc=%d,hash_date_author=%d' % (
-          len(hash_loc), len(hash_date_author)))
 
     assert hash_loc and hash_date_author
 
@@ -1257,13 +1196,8 @@ def analyze_blame(blame_map, report_map):
         if author not in author_date_hash_loc.keys():
             author_date_hash_loc[author] = []
         author_date_hash_loc[author].append((date, hsh, loc))
-        if i % 20000 == 0:
-            dt = time.time() - t0
-            if dt:
-                print('%8d %.3f, %5.1f sec, %.1f items/sec' % (i, i / len(hash_loc), dt, i /dt))
 
     assert author_loc
-    print('analyze_blame: 2')
 
     for author in author_date_hash_loc.keys():
         author_date_hash_loc[author].sort()
@@ -1277,7 +1211,7 @@ def analyze_blame(blame_map, report_map):
             date_hash_loc = sorted(author_date_hash_loc[author], key=lambda dhl: (-dhl[2], dhl[0]))
             print('-' * 80)
             print('%s: %d commits, %d loc' % (author, len(date_hash_loc),
-                  sum(loc for _, _,loc in date_hash_loc)))
+                  sum(loc for _, _, loc in date_hash_loc)))
             for i, (date, hsh, loc) in enumerate(date_hash_loc[:10]):
                 print('%3d: %8s, %s, %5d' % (i, hsh, date, loc))
 
@@ -1291,37 +1225,26 @@ def analyze_blame(blame_map, report_map):
         author_stats[author] = (loc, dates, days, ratio)
     assert author_stats
 
-    if False:
-        print('~' * 80)
-        print('Author stats')
-        total = sum(author_loc.values())
-        average_loc = total / len(author_loc)
+    # if False:
+    #     print('~' * 80)
+    #     print('Author stats')
+    #     total = sum(author_loc.values())
 
-        def author_key(key):
-            loc, dates, days, ratio = author_stats[key]
-            return days < 60, -ratio
+    #     def author_key(key):
+    #         loc, dates, days, ratio = author_stats[key]
+    #         return days < 60, -ratio
 
-        author_list = sorted(author_stats.keys(), key=author_key)
-        for author in author_list:
-            loc, dates, days, ratio = author_stats[author]
-            print('%-20s %6d %4.1f%% %s %4d %4.1f' % (author, loc, loc / total * 100,
-                  [date_str(d) for d in dates], days, ratio))
-        print('@' * 80)
-    print('hash_loc=%d,hash_date_author=%d' % (len(hash_loc), len(hash_date_author)))
-    t0 = time.time()
+    #     author_list = sorted(author_stats.keys(), key=author_key)
+    #     for author in author_list:
+    #         loc, dates, days, ratio = author_stats[author]
+    #         print('%-20s %6d %4.1f%% %s %4d %4.1f' % (author, loc, loc / total * 100,
+    #               [date_str(d) for d in dates], days, ratio))
+    #     print('@' * 80)
 
     author_date_loc = defaultdict(list)
     for hsh, loc in hash_loc.items():
         date, author = hash_date_author[hsh]
         author_date_loc[author].append((date, loc))
-
-    print('author_date_loc=%d,%d' % (len(author_date_loc),
-                                     sum(len(v) for v in author_date_loc.values())
-                                   ))
-    print('authors:', sorted(author_date_loc.keys())[:100])
-    dt = time.time() - t0
-    print('%.2f seconds %.1f items / sec' % (dt, (len(hash_date_author) / dt) if dt else 0))
-    print('#' * 60)
 
     return {'author_list': report_map.author_list,
             'ext_list': report_map.ext_list,
@@ -1332,24 +1255,25 @@ def analyze_blame(blame_map, report_map):
             'author_stats': author_stats}
 
 
-DAY = pd.Timedelta('1 days') # 24 * 3600 * 1e9
-
 def get_peak_commits(hash_loc, date_hash_loc, history, window=20 * DAY):
     """Return lists of commits around peaks in a time series
     """
     ts, peak_ixy = history
     dt = window / 2
 
-    print('date_hash_loc:', type(date_hash_loc))
-    print('date_hash_loc:', len(date_hash_loc))
+    # print('date_hash_loc:', type(date_hash_loc))
+    # print('date_hash_loc:', len(date_hash_loc))
     assert len(date_hash_loc[0]) == 3, date_hash_loc[0]
 
-    peak_ends = [(x - dt, x + dt) for _, x, _ in peak_ixy]
+    peak_ixy = sorted(peak_ixy, key=lambda k: key_ixy_x(*k))
+
+    peak_ends = [[x - dt, x + dt] for _, x, _ in peak_ixy]
     for i in xrange(1, len(peak_ends)):
         m0, m1 = peak_ends[i - 1]
         n0, n1 = peak_ends[i]
-        if n0 > n1:
-            peak_ends[i - 1][1] = peak_ends[i][0] = (peak_list[0] + peak_list[1]) / 2
+        # assert m1 <= n0, '\n%s\n%s' % ([m0, m1], [n0, n1])
+        if m1 > n0:
+            peak_ends[i - 1][1] = peak_ends[i][0] = m1 + (n0 - m1) / 2
 
     peak_commits = []
     for (i, x, y), (m0, m1) in zip(peak_ixy, peak_ends):
@@ -1365,21 +1289,20 @@ def get_peak_commits(hash_loc, date_hash_loc, history, window=20 * DAY):
 
 def plot_analysis(blame_map, report_map, history, author, do_show, graph_path):
 
-    print('plot_analysis: before')
+    # print('plot_analysis: before')
 
     # update figure number
     fig, ax0 = plt.subplots(nrows=1)
 
     label = None
     ts, peak_idx = history
-    if peak_idx:
-        is_annotated = True
-    print('Time series: %s: %s' % (label, ts_summary(ts)))
+
+    # print('Time series: %s: %s' % (label, ts_summary(ts)))
     plot_loc_date(ax0, label, (ts, peak_idx))
 
-    print('plot_analysis: plot')
+    # print('plot_analysis: plot')
     plot_show(ax0, blame_map, report_map, author, do_show, graph_path, False)
-    print('plot_analysis: after')
+    # print('plot_analysis: after')
 
 
 def aggregate_author_date_hash_loc(author_date_hash_loc, author_list=None):
@@ -1405,32 +1328,30 @@ def aggregate_author_stats(author_stats, author_list):
     return a_loc, (a_date_min, a_date_max), a_days, a_ratio
 
 
-def write_legend(f, author_date_loc, hash_loc, history, date_hash_loc,
-    hash_date_author, author, N_TOP):
-
-    def put(s):
-        # print(s)
-        f.write('%s\n' % s)
+def write_legend(legend_path, author_date_loc, hash_loc, history, date_hash_loc,
+    hash_date_author, author, n_top_commits):
 
     loc_auth, peak_ixy_commits = get_peak_commits(hash_loc, date_hash_loc, history)
     peak_ixy_commits.sort(key=lambda k: key_ixy_x(*k[0]))
-    put('=' * 80)
-    put('%s: %d peaks %d LoC' % (author, len(peak_ixy_commits), loc_auth))
-    print('write_legend %s' % [author, len(peak_ixy_commits), loc_auth], end=',')
 
-    for (i, x, y), (loc, peak, mode_hashes) in peak_ixy_commits:
-        put('.' * 80)
-        put('%3d) %d commits %d LoC around %s' % (i + 1, len(mode_hashes), loc, date_str(peak)))
-        print('%3d) %d commits %d LoC around %s' % (i + 1, len(mode_hashes), loc, date_str(peak)))
+    with open(legend_path, 'wt') as f:
 
-        # !@#$ Replace N_TOP
-        for hsh in sorted(mode_hashes[:N_TOP], key=lambda k: hash_date_author[k][0]):
-            put('%5d LoC, %s %s' % (hash_loc[hsh], date_str(hash_date_author[hsh][0]),
-                git_show_oneline(hsh)))
-    # exit()
+        def put(s):
+            f.write('%s\n' % s)
+
+        put('=' * 80)
+        put('%s: %d peaks %d LoC' % (author, len(peak_ixy_commits), loc_auth))
+
+        for (i, x, y), (loc, peak, mode_hashes) in peak_ixy_commits:
+            put('.' * 80)
+            put('%3d) %d commits %d LoC around %s' % (i + 1, len(mode_hashes), loc, date_str(peak)))
+            for hsh in sorted(mode_hashes[:n_top_commits], key=lambda k: hash_date_author[k][0]):
+                put('%5d LoC, %s %s' % (hash_loc[hsh], date_str(hash_date_author[hsh][0]),
+                    git_show_oneline(hsh)))
 
 
-def write_oldest(f, author, hash_path_loc, date_hash_loc, hash_date_author, n_revisions, n_files):
+def put_newest_oldest(f, author, hash_path_loc, date_hash_loc, hash_date_author, n_revisions,
+    n_files, is_newest):
     """Write a report of oldest surviving revisions in current revision
         n_revisions: Max number of revisions to write
         n_files: Max number of files to write for each revision
@@ -1444,10 +1365,14 @@ def write_oldest(f, author, hash_path_loc, date_hash_loc, hash_date_author, n_re
             ...
     """
     def put(s):
-        # print(s)
         f.write('%s\n' % s)
 
-    date_hash_loc = sorted(date_hash_loc, key=lambda dhl: (dhl[0], -dhl[2]))
+    def date_key(date, hsh, loc):
+        return date, loc
+
+    date_hash_loc = sorted(date_hash_loc, key=lambda k: date_key(*k))
+    if is_newest:
+        date_hash_loc.reverse()
     loc_total = sum(loc for _, _, loc in date_hash_loc)
 
     put('=' * 80)
@@ -1456,25 +1381,42 @@ def write_oldest(f, author, hash_path_loc, date_hash_loc, hash_date_author, n_re
     for i, (date, hsh, loc) in enumerate(date_hash_loc[:n_revisions]):
         put('.' * 80)
         put('%5d LoC, %s %s' % (loc, date_str(hash_date_author[hsh][0]),
-                git_show_oneline(hsh)))
+            git_show_oneline(hsh)))
 
         path_loc = hash_path_loc[hsh].items()
         path_loc.sort(key=lambda k: (-k[1], k[0]))
-        # !@#$ compute hash_path_loc from path_hash_loc
         for j, (path, l) in enumerate(path_loc[:n_files]):
             put('%5d LoC,   %s' % (l, path))
 
 
+def write_newest(newest_path, author, hash_path_loc, date_hash_loc, hash_date_author, n_revisions,
+    n_files):
+
+    with open(newest_path, 'wt') as f:
+        put_newest_oldest(f, author, hash_path_loc, date_hash_loc, hash_date_author, n_revisions,
+                          n_files, True)
+
+
+def write_oldest(oldest_path, author, hash_path_loc, date_hash_loc, hash_date_author, n_revisions,
+    n_files):
+
+    with open(oldest_path, 'wt') as f:
+        put_newest_oldest(f, author, hash_path_loc, date_hash_loc, hash_date_author, n_revisions,
+                          n_files, False)
+
+
 def make_hash_path_loc(path_hash_loc):
-    print('make_hash_path_loc 1: path_hash_loc=%d' % len(path_hash_loc))
+    # print('make_hash_path_loc 1: path_hash_loc=%d' % len(path_hash_loc))
     hash_path_loc = defaultdict(dict)
     for path, hash_loc in path_hash_loc.items():
         for hsh, loc in hash_loc.items():
             hash_path_loc[hsh][path] = loc
-    print('make_hash_path_loc 2: hash_path_loc=%d' % len(hash_path_loc))
+    # print('make_hash_path_loc 2: hash_path_loc=%d' % len(hash_path_loc))
     return hash_path_loc
 
-def save_analysis(blame_map, report_map, analysis, _a_list, do_save, do_show, N_TOP=3):
+
+def save_analysis(blame_map, report_map, analysis, _a_list, do_save, do_show,
+    n_top_authors, n_top_commits, n_oldest, n_files):
     """Create a graph (time series + markers)
         a list of commits in for each peak
         + n biggest commits
@@ -1492,7 +1434,6 @@ def save_analysis(blame_map, report_map, analysis, _a_list, do_save, do_show, N_
     hash_loc = analysis['hash_loc']
     _author_date_hash_loc = analysis['author_date_hash_loc']
     author_date_loc = analysis['author_date_loc']
-    author_stats = analysis['author_stats']
     ext_list = analysis['ext_list']
 
     if not _a_list:
@@ -1508,22 +1449,22 @@ def save_analysis(blame_map, report_map, analysis, _a_list, do_save, do_show, N_
     # !@#$ need a better name than history
     report_name = '[%s]' % (concat(sorted(ext_list)) if ext_list else 'all')
     if do_save:
-        graph_name = 'history%s.png' % report_name
-        legend_name = 'history%s.txt' % report_name
+        graph_name = 'code-age%s.png' % report_name
+        legend_name = 'code-age%s.txt' % report_name
+        newest_name = 'newest%s.txt' % report_name
         oldest_name = 'oldest%s.txt' % report_name
         graph_path = os.path.join(reports_dir, graph_name)
         legend_path = os.path.join(reports_dir, legend_name)
+        newest_path = os.path.join(reports_dir, newest_name)
         oldest_path = os.path.join(reports_dir, oldest_name)
-        print('graph_path="%s"' % graph_path)
-        print('legend_path="%s"' % legend_path)
-        print('oldest_path="%s"' % oldest_path)
+
         hash_path_loc = make_hash_path_loc(blame_map.path_hash_loc)
-        with open(legend_path, 'wt') as f:
-            write_legend(f, author_date_loc, hash_loc, history, date_hash_loc,
-                         hash_date_author, author, N_TOP)
-        with open(oldest_path, 'wt') as f:
-            write_oldest(f, author, hash_path_loc, date_hash_loc, hash_date_author, n_revisions=50,
-                         n_files=3)
+        write_legend(legend_path, author_date_loc, hash_loc, history, date_hash_loc,
+                     hash_date_author, author, n_top_commits)
+        write_newest(newest_path, author, hash_path_loc, date_hash_loc, hash_date_author,
+                     n_oldest, n_files)
+        write_oldest(oldest_path, author, hash_path_loc, date_hash_loc, hash_date_author,
+                     n_oldest, n_files)
     else:
         graph_path = None
 
@@ -1531,9 +1472,9 @@ def save_analysis(blame_map, report_map, analysis, _a_list, do_save, do_show, N_
     plot_analysis(blame_map, report_map, history, author, do_show, graph_path)
 
 
-def main(path_list, force, author_pattern, ext_pattern, do_save, do_show):
-
-    # assert author_list is None or isinstance(author_list, (set, list, tuple)), author_list
+def create_reports(path_patterns, do_save, do_show, force,
+                   author_pattern, ext_pattern,
+                   n_top_authors, n_top_commits, n_oldest, n_files):
 
     remote_url, remote_name = git_remote()
     description = git_describe()
@@ -1547,21 +1488,18 @@ def main(path_list, force, author_pattern, ext_pattern, do_save, do_show):
     #     rev\          ~/git.stats/papercut/2015-11-16.3f4632c6
     #       reports\    ~/git.stats/papercut/2015-11-16.3f4632c6/reports/tools_page-analysis-tools
     root_dir = os.path.join(os.path.expanduser('~'), 'git.stats')
-    repo_dir = os.path.join(root_dir, remote_name)
+    repo_base_dir = os.path.join(root_dir, remote_name)
+    repo_dir = os.path.join(repo_base_dir, 'reports')
     rev_dir = os.path.join(repo_dir, '.'.join([date_ymd, truncate_hash(commit)]))
-    # data_dir = os.path.join(rev_dir, 'data')
 
-    path_list = [normalize_path(path) for path in path_list]
-    if not path_list or (len(path_list) == 1 and path_list[0] == '.'):
+    path_patterns = [normalize_path(path) for path in path_patterns]
+    if not path_patterns or (len(path_patterns) == 1 and path_patterns[0] == '.'):
         reports_name = '[root]'
     else:
-        reports_name = '.'.join(clean_path(path) for path in path_list)
-    reports_dir = os.path.join(rev_dir, 'reports', reports_name)
-    for s in path_list:
-        print([s, clean_path(s)])
-    manifest_path = os.path.join(rev_dir, 'manifest')
+        reports_name = '.'.join(clean_path(path) for path in path_patterns)
+    reports_dir = os.path.join(rev_dir, reports_name)
 
-    print('remote: %s (%s) %s' % (remote_name, remote_url, date_ymd))
+    # print('remote: %s (%s) %s' % (remote_name, remote_url, date_ymd))
 
     assert date < MAX_DATE, date
 
@@ -1580,22 +1518,20 @@ def main(path_list, force, author_pattern, ext_pattern, do_save, do_show):
     pprint(repo_summary)
     pprint(rev_summary)
 
-    file_list = git_file_list(path_list)
+    file_list = git_file_list(path_patterns)
 
-    blame_map = BlameMap(repo_summary, rev_summary)
-    # print(blame_map.get_description())
-    # assert False
+    blame_map = BlameMap(repo_base_dir, repo_summary, rev_summary)
     if not force:
         blame_map.load()
     changed = blame_map.update(file_list)
     if changed:
         blame_map.save(force)
 
-    report_map_all = ReportMap(blame_map, blame_map.path_hash_loc, path_list, reports_dir, file_list,
-                               author_pattern, ext_pattern)
+    report_map_all = ReportMap(blame_map, blame_map.path_hash_loc, path_patterns, reports_dir,
+                               file_list, author_pattern, ext_pattern)
     author_loc_dates, top_authors = get_top_authors(blame_map, report_map_all)
 
-    top_a_list = [None] + [[a] for a in top_authors]
+    top_a_list = [None] + [[a] for a in top_authors[:n_top_authors]]
     reports_dir_list = []
     all_authors0 = {a for _, a in blame_map.hash_date_author.values()}
 
@@ -1606,16 +1542,17 @@ def main(path_list, force, author_pattern, ext_pattern, do_save, do_show):
         reports_dir_author = os.path.join(reports_dir, clean_path(reports_dir_author))
         if a_list:
             assert a_list[0] in all_authors, (a_list[0], all_authors)
-        report_map = ReportMap(blame_map, report_map_all.path_hash_loc,  path_list, reports_dir_author,
+        report_map = ReportMap(blame_map, report_map_all.path_hash_loc, path_patterns,
+                               reports_dir_author,
                                None, None, None, a_list)
         all_authors = {a for _, a in blame_map.hash_date_author.values()}
         assert all_authors == all_authors0, (all_authors, all_authors0)
 
-
         analysis = analyze_blame(blame_map, report_map)
 
         save_tables(blame_map, report_map)
-        save_analysis(blame_map, report_map, analysis, a_list, do_save, do_show)
+        save_analysis(blame_map, report_map, analysis, a_list, do_save, do_show,
+            n_top_authors, n_top_commits, n_oldest, n_files)
         print('reports_dir=%s' % os.path.abspath(report_map.reports_dir))
         reports_dir_list.append(os.path.abspath(report_map.reports_dir))
 
@@ -1624,7 +1561,7 @@ def main(path_list, force, author_pattern, ext_pattern, do_save, do_show):
     for reports_dir_author in reports_dir_list:
         print('reports_dir=%s' % reports_dir_author)
 
-    print(blame_map.get_description())
+    print('description="%s"' % blame_map.get_description())
 
 
 if __name__ == '__main__':
@@ -1643,12 +1580,19 @@ if __name__ == '__main__':
                       help='Analyze only code with these authors')
     parser.add_option('-e', '--extensions', dest='ext_pattern', default=None,
                       help='Analyze only files with these extensions')
+    parser.add_option('-A', '--number-top-authors', dest='n_top_authors', type=int, default=10,
+                      help='Number of authors to list')
+    parser.add_option('-O', '--number-oldest-tweets', dest='n_oldest', type=int, default=20,
+                      help='Number of oldest (and newest) commits to list')
+    parser.add_option('-C', '--number-commits', dest='n_top_commits', type=int, default=5,
+                      help='Number of commits to list for each author')
+    parser.add_option('-F', '--number-files', dest='n_files', type=int, default=3,
+                      help='Number of files to list for each commit in a report')
 
     do_save = True
 
     options, args = parser.parse_args()
 
-    main(args, options.force, options.author_pattern, options.ext_pattern, do_save, options.do_show)
-    print('DONE')
-    print('D0NE')
-    show_versions()
+    create_reports(args, do_save, options.do_show, options.force,
+                   options.author_pattern, options.ext_pattern,
+                   options.n_top_authors, options.n_top_commits, options.n_oldest, options.n_files)
