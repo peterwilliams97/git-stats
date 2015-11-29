@@ -487,11 +487,12 @@ def find_peaks(ts):
     """
     from scipy import signal
 
-    MIN_PEAK_DAYS = 60
+    MIN_PEAK_DAYS = 60   # !@#$ Reduce this
     MAX_PEAK_DAYS = 1
+
     # !@#$ Tune np.arange(2, 10) * 10 to data
     peak_idx = signal.find_peaks_cwt(ts, np.arange(2, 10) * 10)
-    peak_idx.sort(key=lambda k: -ts.iloc[k])
+    # peak_idx.sort(key=lambda k: (-ts.iloc[k], ts.index[k]))
     peak_idx = [i for i in peak_idx
                 if (delta_days(ts.index[0], ts.index[i]) >= MIN_PEAK_DAYS and
                     delta_days(ts.index[i], ts.index[-1]) >= MAX_PEAK_DAYS)
@@ -506,6 +507,7 @@ def __analyze_time_series(loc, date, window=60):
     """Return a histogram of LoC / day for events given by `loc` and `date`
         loc: list of LoC events
         date: list of timestamps for loc
+        n_peaks: max number of peaks to find
         window: width of weighted moving average window used to smooth data
         Returns: averaged time series, list of peaks in time series
     """
@@ -524,7 +526,7 @@ def __analyze_time_series(loc, date, window=60):
     return ts_ma, peak_idx
 
 
-def make_history(author_date_loc, author_list=None):
+def make_history(author_date_loc, n_peaks, author_list=None):
     """Return a history for all authors in `author_list`
     """
     # date_loc could be a Series !@#$
@@ -549,7 +551,7 @@ def make_history(author_date_loc, author_list=None):
         return -y, x, p
 
     peak_pxy.sort(key=lambda k: key_pxy(*k))
-    peak_ixy = [(i, x, y) for i, (p, x, y) in enumerate(peak_pxy)]
+    peak_ixy = [(i, x, y) for i, (p, x, y) in enumerate(peak_pxy[:n_peaks])]
 
     return ts, tuple(peak_ixy)
 
@@ -1416,7 +1418,7 @@ def make_hash_path_loc(path_hash_loc):
 
 
 def save_analysis(blame_map, report_map, analysis, _a_list, do_save, do_show,
-    n_top_authors, n_top_commits, n_oldest, n_files):
+    _n_top_authors, n_peaks, n_top_commits, n_oldest, n_files):
     """Create a graph (time series + markers)
         a list of commits in for each peak
         + n biggest commits
@@ -1443,7 +1445,7 @@ def save_analysis(blame_map, report_map, analysis, _a_list, do_save, do_show,
     else:
         assert False, _a_list
     date_hash_loc = aggregate_author_date_hash_loc(_author_date_hash_loc, _a_list)
-    history = make_history(author_date_loc, _a_list)
+    history = make_history(author_date_loc, n_peaks, _a_list)
 
     # !@#$ history are needed for 'all' and all major authors
     # !@#$ need a better name than history
@@ -1474,7 +1476,7 @@ def save_analysis(blame_map, report_map, analysis, _a_list, do_save, do_show,
 
 def create_reports(path_patterns, do_save, do_show, force,
                    author_pattern, ext_pattern,
-                   n_top_authors, n_top_commits, n_oldest, n_files):
+                   n_top_authors, n_peaks, n_top_commits, n_oldest, n_files):
 
     remote_url, remote_name = git_remote()
     description = git_describe()
@@ -1552,7 +1554,7 @@ def create_reports(path_patterns, do_save, do_show, force,
 
         save_tables(blame_map, report_map)
         save_analysis(blame_map, report_map, analysis, a_list, do_save, do_show,
-            n_top_authors, n_top_commits, n_oldest, n_files)
+            n_top_authors, n_peaks, n_top_commits, n_oldest, n_files)
         print('reports_dir=%s' % os.path.abspath(report_map.reports_dir))
         reports_dir_list.append(os.path.abspath(report_map.reports_dir))
 
@@ -1580,8 +1582,12 @@ if __name__ == '__main__':
                       help='Analyze only code with these authors')
     parser.add_option('-e', '--extensions', dest='ext_pattern', default=None,
                       help='Analyze only files with these extensions')
+
+    # Display / Report options
     parser.add_option('-A', '--number-top-authors', dest='n_top_authors', type=int, default=10,
                       help='Number of authors to list')
+    parser.add_option('-P', '--number-peaks', dest='n_peaks', type=int, default=10,
+                      help='Number of peaks to find in a code age graph')
     parser.add_option('-O', '--number-oldest-tweets', dest='n_oldest', type=int, default=20,
                       help='Number of oldest (and newest) commits to list')
     parser.add_option('-C', '--number-commits', dest='n_top_commits', type=int, default=5,
@@ -1595,4 +1601,5 @@ if __name__ == '__main__':
 
     create_reports(args, do_save, options.do_show, options.force,
                    options.author_pattern, options.ext_pattern,
-                   options.n_top_authors, options.n_top_commits, options.n_oldest, options.n_files)
+                   options.n_top_authors, options.n_peaks,
+                   options.n_top_commits, options.n_oldest, options.n_files)
