@@ -15,6 +15,9 @@ Tested with
     matplotlib: 1.4.3
     pandas    : 0.16.2
 
+Run [version.py](https://github.com/peterwilliams97/git-stats/blob/master/version.py) to find which
+versions you have.
+
 # [code-age](https://github.com/peterwilliams97/git-stats/blob/master/code-age.py)
 Analyzes the age of files in a git repository and writes some reports and draws some graphs about them.
 
