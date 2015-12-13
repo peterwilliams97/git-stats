@@ -1,4 +1,4 @@
-# [gitstats](https://twitter.com/git_stats)
+# [git-stats](https://twitter.com/git_stats)
 Compute and display statistics of git repositories
 
 # Requirements
@@ -10,15 +10,12 @@ conda update anaconda
 
 Tested with
 
-    python    : 2.7.5
-    numpy     : 1.9.2
-    matplotlib: 1.4.3
-    pandas    : 0.16.2
+    python    : 2.7.10
+    numpy     : 1.10.1
+    matplotlib: 1.5.0
+    pandas    : 0.17.1
 
-Run [version.py](https://github.com/peterwilliams97/git-stats/blob/master/version.py) to find which
-versions you have.
-
-# [code-age](https://github.com/peterwilliams97/git-stats/blob/master/code-age.py)
+#code-age
 Analyzes the age of files in a git repository and writes some reports and draws some graphs about them.
 
 
@@ -52,7 +49,7 @@ e.g. For repository _linux_
 A closer look at  `[root]/linux/reports/2015-11-25.6ffeba96/_sh/Adrian_Hunter`
 
 ## history[all].png
-![Age graph](https://github.com/peterwilliams97/git-stats/blob/master/history%5Ball%5D.png)
+![Age graph](https://github.com/peterwilliams97/gitstats/blob/master/history%5Ball%5D.png)
 
 
 ## history[all].txt
