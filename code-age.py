@@ -271,6 +271,16 @@ def git_file_list(path_patterns=()):
     return exec_output_lines(['git', 'ls-files'] + path_patterns, False)
 
 
+def git_pending_list(path_patterns=()):
+    return exec_output_lines(['git',  'diff', '--name-only'] + path_patterns, False)
+
+
+def git_file_list_no_pending(path_patterns=()):
+    file_list = git_file_list(path_patterns)
+    pending = set(git_pending_list(path_patterns))
+    return [path for path in file_list if path not in pending]
+
+
 def git_diff(rev1, rev2):
     return exec_output_lines(['git', 'diff', '--name-only', rev1, rev2], False)
 
@@ -365,7 +375,11 @@ RE_BLAME = re.compile(b'''
 
 
 class GitException(Exception):
-    pass
+
+    def __init__(self, msg=None):
+        super(GitException, self).__init__(msg)
+        self.git_msg = msg
+
 
 
 if is_windows():
@@ -390,8 +404,7 @@ def _update_text_hash_loc(hash_date_author, path_hash_loc, path_set, author_set,
     while lines and not lines[-1]:
         lines.pop()
     if not lines:
-        print('    %s is empty' % path, file=sys.stderr)
-        raise GitException
+        raise GitException('is empty')
 
     for i, ln in enumerate(lines):
         if not ln:
@@ -451,7 +464,7 @@ def get_ignored_files(gitstatsignore):
             line = line.strip('\n').strip()
             if not line:
                 continue
-            ignored_files.update(git_file_list([line]))
+            ignored_files.update(git_file_list_no_pending([line]))
 
     return ignored_files
 
@@ -972,10 +985,12 @@ class BlameMap(object):
                 text = git_blame_text(path)
                 _update_text_hash_loc(hash_date_author, path_hash_loc, path_set, author_set,
                                       ext_set, text, path, max_date)
-            except GitException:
+            except GitException as e:
                 apath = os.path.abspath(path)
                 self.bad_files.add(path)
-                if not os.path.exists(path):
+                if e.git_msg:
+                    print('    %s %s' % (apath, e.git_msg), file=sys.stderr)
+                elif not os.path.exists(path):
                     print('    %s no longer exists' % apath, file=sys.stderr)
                 elif os.path.isdir(path):
                     print('   %s is a directory' % apath, file=sys.stderr)
@@ -1574,7 +1589,8 @@ def save_analysis(blame_map, report_map, analysis, _a_list, do_save, do_show,
     history = make_history(author_date_loc, n_peaks, _a_list)
     tsm, _ = history
     if tsm.max() - tsm.min() < n_min_days:
-        print('%d days of activity < %d. Not reporting' % (tsm.max() - tsm.min(), n_min_days))
+        print('%d days of activity < %d. Not reporting for author "%s"' % (
+              tsm.max() - tsm.min(), n_min_days,author))
         return False
 
     # !@#$ need a better name than history
@@ -1657,7 +1673,7 @@ def create_reports(gitstatsignore, path_patterns, do_save, do_show, force,
 
     ignored_files = get_ignored_files(gitstatsignore)
 
-    file_list0 = git_file_list(path_patterns)
+    file_list0 = git_file_list_no_pending(path_patterns)
     file_list = {path for path in file_list0
                  if get_ext(path) not in IGNORED_EXTS}
     file_list -= ignored_files
