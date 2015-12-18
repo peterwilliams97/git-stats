@@ -164,12 +164,8 @@ def load_object(path, default=None):
     if default is not None and not os.path.exists(path):
         return default
     try:
-        try:
-            with bz2.BZ2File(path, 'r') as f:
-                return pickle.load(f)
-        except:
-            with open(path, 'rb') as f:
-                return pickle.load(f)
+        with bz2.BZ2File(path, 'r') as f:
+            return pickle.load(f)
     except:
         print('load_object(%s, %s) failed' % (path, default), file=sys.stderr)
         raise
@@ -236,7 +232,7 @@ def print_fit(s, width=100):
     """Print string `s` in `width` chars, removing middle characters if necessary"""
     width = max(20, width)
     if len(s) > width:
-        notch = int(round(width * 0.75)) - 5
+        notch = int(round(width * 0.6)) - 5
         end = width - 5 - notch
         return '%s ... %s' % (s[:notch], s[-end:])
     return s
@@ -363,7 +359,7 @@ def git_blame_text(path):
     return exec_output(['git', 'blame', '-l', '-f', '-w', '-M', path], False)
 
 
-RE_BLAME = re.compile(b'''
+RE_BLAME = re.compile(r'''
                       \^*([0-9a-f]{4,})\s+
                       .+?\s+
                       \(
@@ -374,6 +370,17 @@ RE_BLAME = re.compile(b'''
                       re.DOTALL | re.MULTILINE | re.VERBOSE)
 
 
+def _check_dates(max_date, hash_date_author, path_hash_loc):
+
+    for path, (revision, hash_loc) in path_hash_loc.items():
+        for hsh, loc in hash_loc.items():
+            if loc <= 1:
+                continue
+            assert hsh in hash_date_author, (hsh, path)
+            date, _ = hash_date_author[hsh]
+            assert date <= max_date, (hsh, loc, revision, [date, max_date], path)
+
+
 class GitException(Exception):
 
     def __init__(self, msg=None):
@@ -381,22 +388,19 @@ class GitException(Exception):
         self.git_msg = msg
 
 
-
 if is_windows():
-    RE_LINE = re.compile(b'(?:\r\n|\n)+')
+    RE_LINE = re.compile(r'(?:\r\n|\n)+')
 else:
-    RE_LINE = re.compile(b'[\n]+')
+    RE_LINE = re.compile(r'[\n]+')
 
 
-def _update_text_hash_loc(hash_date_author, path_hash_loc, path_set, author_set, ext_set,
-    text, path, max_date=None):
+def _update_text_hash_loc(max_date, current_revision, hash_date_author, path_hash_loc, path_set,
+                          author_set, ext_set, text, path):
     """Update key data structures with information that we parse from `text` in this function
     """
 
-    if max_date is None:
-        max_date = MAX_DATE
-
     assert max_date <= MAX_DATE, max_date
+    _check_dates(max_date, hash_date_author, path_hash_loc)
 
     hash_loc = Counter()
 
@@ -432,21 +436,22 @@ def _update_text_hash_loc(hash_date_author, path_hash_loc, path_set, author_set,
 
         date = to_timestamp(date_s)
 
-        if date > max_date:
-            print('Bogus timestamp: %s:%d\n%s' % (path, i + 1, ln[:200]), file=sys.stderr)
-            continue
-
         hash_loc[hsh] += 1
         hash_date_author[hsh] = (date, author)
+        assert date <= max_date, (hsh, author, [date, max_date])
         author_set.add(author)
 
     assert all(hsh in hash_date_author for hsh in hash_loc), path
 
-    path_hash_loc[path] = hash_loc
+    path_hash_loc[path] = (current_revision, hash_loc)
+    _check_dates(max_date, hash_date_author, path_hash_loc)
     if STRICT_CHECKING:
         assert path in path_hash_loc, path
-        assert len(path_hash_loc[path]) > 0, path
-        assert sum(path_hash_loc[path].values()) > 0, path
+        current_revision, hash_loc = path_hash_loc[path]
+        assert len(hash_loc) > 0, path
+        assert sum(hash_loc.values()) > 0, path
+
+        assert path_hash_loc[path], path
 
 
 def get_ignored_files(gitstatsignore):
@@ -843,9 +848,11 @@ class BlameMap(object):
         blame_map._rev_map.base_dir = rev_dir
         return blame_map
 
-    def load(self):
+    def load(self, max_date):
         self._repo_map.load()
         self._rev_map.load()
+        if max_date is not None:
+            _check_dates(max_date, self.hash_date_author, self.path_hash_loc)
         return self
 
     def save(self, force):
@@ -885,11 +892,12 @@ class BlameMap(object):
                      os.path.exists(os.path.join(rev_dir, 'data.pkl'))]
 
         for rev_dir in peer_dirs:
-            rev = self.copy(rev_dir).load()
+            rev = self.copy(rev_dir).load(None)
             yield rev_dir, rev
 
     def _update_from_existing(self, file_list):
 
+        # remaining_path_set = files in file_list that we haven't yet loaded
         remaining_path_set = set(file_list) - self.path_set
 
         print('-' * 80)
@@ -903,13 +911,26 @@ class BlameMap(object):
         print('Checking up to %d peer revisions for blame data' % len(peer_revisions))
 
         this_hash = self._rev_map.summary['revision_hash']  # !@#$% commit => revision
+        this_date = self._rev_map.summary['date']
 
-        for i, (rev_dir, that_rev) in enumerate(peer_revisions):
+        peer_revisions.sort(key=lambda dir_rev: dir_rev[1]._rev_map.summary['date'])
+
+        for i, (that_dir, that_rev) in enumerate(peer_revisions):
 
             if not remaining_path_set:
                 break
 
-            print('%2d: %s,' % (i, rev_dir), end=' ')
+            print('%2d: %s,' % (i, that_dir), end=' ')
+
+            # This is important. git diff can report 2 versions of a file as being identical while
+            # git blame reports different commits for 1 or more lines in the file
+            # In these cases we use the older commits.
+            that_date = that_rev._rev_map.summary['date']
+            sign = '>' if that_date > this_date else '<'
+            print('%s %s %s' % (date_str(that_date), sign, date_str(this_date)), end=' ')
+            if that_date > this_date:
+                print('later')
+                continue
 
             that_hash = that_rev._rev_map.summary['revision_hash']
             that_path_set = that_rev.path_set
@@ -917,17 +938,21 @@ class BlameMap(object):
             diff_set = set(git_diff(this_hash, that_hash))
 
             self.bad_files.update(that_bad_files - diff_set)
+            # existing_path_set: files in remaining_path_set that we already have data for
             existing_path_set = remaining_path_set & (that_path_set - diff_set)
 
             for path in existing_path_set:
                 assert path in that_path_set
                 if path in that_rev.path_hash_loc:
                     self.path_hash_loc[path] = that_rev.path_hash_loc[path]
+                    if STRICT_CHECKING:
+                        for hsh in self.path_hash_loc[path][1].keys():
+                            assert hsh in self.hash_date_author, (hsh, path)
 
                 self.path_set.add(path)
                 remaining_path_set.remove(path)
-            print('%d files of %d remaining, diff=%d' % (
-                   len(remaining_path_set), len(file_list), len(diff_set)))
+            print('%d files of %d remaining, diff=%d, used=%d' % (
+                   len(remaining_path_set), len(file_list), len(diff_set), len(existing_path_set)))
 
     def _update_new_files(self, file_list, force):
         """Compute base statistics over whole revision
@@ -954,7 +979,7 @@ class BlameMap(object):
         print('Update data by blaming %d files' % len(file_list))
 
         paths0 = len(path_set)
-        loc0 = sum(sum(hash_loc.values()) for hash_loc in path_hash_loc.values())
+        loc0 = sum(sum(hash_loc.values()) for _, hash_loc in path_hash_loc.values())
         commits0 = len(hash_date_author)
         start = time.time()
         blamed = 0
@@ -972,7 +997,7 @@ class BlameMap(object):
             if i - last_i >= 100:
                 duration = time.time() - start
 
-                loc = sum(sum(hash_loc.values()) for hash_loc in path_hash_loc.values())
+                loc = sum(sum(hash_loc.values()) for _, hash_loc in path_hash_loc.values())
                 if loc != last_loc:
                     rate = blamed / duration if duration >= 1.0 else 0
                     print('i=%d of %d(%.1f%%),files=%d,loc=%d,commits=%d,dt=%.1f,r=%.1f,path=%s' % (
@@ -980,7 +1005,7 @@ class BlameMap(object):
                           loc - loc0,
                           len(hash_date_author) - commits0,
                           duration, rate,
-                          print_fit(path)))
+                          print_fit(path, width=70)))
                     sys.stdout.flush()
                     last_loc = loc
                     last_i = i
@@ -988,30 +1013,34 @@ class BlameMap(object):
             try:
                 max_date = rev_summary['date']
                 text = git_blame_text(path)
-                _update_text_hash_loc(hash_date_author, path_hash_loc, path_set, author_set,
-                                      ext_set, text, path, max_date)
+                _update_text_hash_loc(max_date, rev_summary['revision_hash'], hash_date_author,
+                                      path_hash_loc, path_set, author_set, ext_set, text, path)
             except Exception as e:
+
                 apath = os.path.abspath(path)
                 self.bad_files.add(path)
+
                 if isinstance(e, GitException):
                     if e.git_msg:
                         print('    %s %s' % (apath, e.git_msg), file=sys.stderr)
                     else:
                         print('   %s cannot be blamed' % apath, file=sys.stderr)
+                    continue
+                elif isinstance(e, subprocess.CalledProcessError):
+                    if not os.path.exists(path):
+                        print('    %s no longer exists' % apath, file=sys.stderr)
                         continue
-                elif not os.path.exists(path):
-                    print('    %s no longer exists' % apath, file=sys.stderr)
-                    continue
-                elif os.path.isdir(path):
-                    print('   %s is a directory' % apath, file=sys.stderr)
-                    continue
-                elif stat.S_IXUSR & os.stat(path)[stat.ST_MODE]:
-                    print('   %s is an executable' % apath, file=sys.stderr)
-                    continue
+                    elif os.path.isdir(path):
+                        print('   %s is a directory' % apath, file=sys.stderr)
+                        continue
+                    elif stat.S_IXUSR & os.stat(path)[stat.ST_MODE]:
+                        print('   %s is an executable. e=%s' % (apath, e), file=sys.stderr)
+                        continue
+                raise
 
             if STRICT_CHECKING:
-                assert path_hash_loc[path], path
-                assert sum(path_hash_loc[path].values()), path
+                assert path_hash_loc[path][1], path
+                assert sum(path_hash_loc[path][1].values()), path
 
             blamed += 1
 
@@ -1023,7 +1052,7 @@ class BlameMap(object):
 
         print('~' * 80)
         duration = time.time() - start
-        loc = sum(sum(hash_loc.values()) for hash_loc in path_hash_loc.values())
+        loc = sum(sum(hash_loc.values()) for _, hash_loc in path_hash_loc.values())
         rate = blamed / duration if duration >= 1.0 else 0
         print('%d files,%d blamed,%d lines,%d commits,dt=%.1f,rate=%.1f' % (len(file_list), blamed,
               loc, len(hash_date_author), duration, rate))
@@ -1034,7 +1063,7 @@ class BlameMap(object):
         # !@#$ remove
         if not STRICT_CHECKING:
             return
-        for h_l in self.path_hash_loc.values():
+        for _, h_l in self.path_hash_loc.values():
             for hsh, loc in h_l.items():
                 date, author = self.hash_date_author[hsh]
 
@@ -1058,9 +1087,6 @@ class BlameMap(object):
         if STRICT_CHECKING:
             for path in set(file_list) - self.bad_files:
                 assert path in self.path_hash_loc, path
-
-        self._repo_map.catalog['hash_date_author'] = {hsh: (date, decode_str(author))
-            for hsh, (date, author) in self._repo_map.catalog['hash_date_author'].items()}
 
         if STRICT_CHECKING:
             for path in set(file_list) - self.bad_files:
@@ -1092,7 +1118,7 @@ def _filter_list(s_list, pattern):
     return {s for s in s_list if regex.search(s)}
 
 
-def filter_path_hash_loc(blame_map, path_hash_loc, file_list=None, author_list=None, ext_list=None):
+def filter_path_hash_loc(max_date, blame_map, path_hash_loc, file_list=None, author_list=None, ext_list=None):
     """Trim `path_hash_loc` down to files in `file_list` authors in `author_list` and extensions
         in `ext_list'
         Note: Does NOT modify path_hash_loc
@@ -1100,13 +1126,9 @@ def filter_path_hash_loc(blame_map, path_hash_loc, file_list=None, author_list=N
         !@#$ does hash_date_author need to be filtered?
 
     """
+    # assert file_list
 
     hash_date_author = blame_map.hash_date_author
-    path_hash_loc0 = path_hash_loc
-
-    for path in path_hash_loc:
-        assert path_hash_loc[path], path
-        assert sum(path_hash_loc[path].values()), path
 
     all_authors0 = {a for _, a in blame_map.hash_date_author.values()}
 
@@ -1116,28 +1138,31 @@ def filter_path_hash_loc(blame_map, path_hash_loc, file_list=None, author_list=N
         author_list = set(author_list)
 
     if file_list or ext_list:
-        path_hash_loc = {path: hash_loc for path, hash_loc in path_hash_loc.items()
+        path_hash_loc = {path: (version, hash_loc)
+                         for path, (version, hash_loc) in path_hash_loc.items()
                          if (not file_list or path in file_list) and
                             (not ext_list or get_ext(path) in ext_list)
                          }
     for path in path_hash_loc:
-        assert path_hash_loc[path], path
-        assert sum(path_hash_loc[path].values()), path
+        assert path_hash_loc[path][1], path
+        assert sum(path_hash_loc[path][1].values()), path
 
     if author_list:
         author_list = set(author_list)
         hash_set = {hsh for hsh, (_, author) in hash_date_author.items() if author in author_list}
-        path_hash_loc = {path: {hsh: loc for hsh, loc in hash_loc.items() if hsh in hash_set}
-                         for path, hash_loc in path_hash_loc.items()}
-        path_hash_loc = {path: hash_loc for path, hash_loc in path_hash_loc.items() if hash_loc}
+        path_hash_loc = {path: (version, {hsh: loc for hsh, loc in hash_loc.items()
+                                          if hsh in hash_set})
+                         for path, (version, hash_loc) in path_hash_loc.items()}
+        path_hash_loc = {path: (version, hash_loc)
+                         for path, (version, hash_loc) in path_hash_loc.items() if hash_loc}
 
     all_authors = {a for _, a in blame_map.hash_date_author.values()}
     assert all_authors == all_authors0, (all_authors, all_authors0)
 
     # print('author_list:', author_list)
     for path in path_hash_loc:
-        assert path_hash_loc[path], path
-        assert sum(path_hash_loc[path].values()), path
+        assert path_hash_loc[path][1], path
+        assert sum(path_hash_loc[path][1].values()), path
 
     return path_hash_loc
 
@@ -1161,8 +1186,8 @@ class ReportMap(object):
         all_authors0 = {a for _, a in blame_map.hash_date_author.values()}
 
         for path in path_hash_loc:
-            assert path_hash_loc[path], path
-            assert sum(path_hash_loc[path].values()), path
+            assert path_hash_loc[path][1], path
+            assert sum(path_hash_loc[path][1].values()), path
 
         authors = {author for _, author in blame_map.hash_date_author.values()}
         exts = {get_ext(path) for path in path_hash_loc.keys()}
@@ -1183,8 +1208,10 @@ class ReportMap(object):
             for path in file_list:
                 assert path in path_hash_loc, path
 
-        path_hash_loc = filter_path_hash_loc(blame_map, path_hash_loc, file_list, self.author_list,
+        path_hash_loc = filter_path_hash_loc(max_date, blame_map, path_hash_loc, file_list, self.author_list,
                                              self.ext_list)
+
+        _check_dates(max_date, blame_map.hash_date_author, path_hash_loc)
 
         assert path_hash_loc
 
@@ -1217,7 +1244,7 @@ def derive_blame(path_hash_loc, hash_date_author):
     #                     for hsh, (date, author) in hash_date_author.items()}
 
     exts = {get_ext(path) for path in path_hash_loc.keys()}
-    authors = {decode_str(author) for _, author in hash_date_author.values()}
+    authors = {author for _, author in hash_date_author.values()}
 
     authors = sorted(authors)
 
@@ -1229,14 +1256,14 @@ def derive_blame(path_hash_loc, hash_date_author):
           len(exts), len(authors),
           len(exts) * len(authors),
           len(path_hash_loc),
-          sum(sum(v.values()) for v in path_hash_loc.values())
+          sum(sum(v.values()) for _, v in path_hash_loc.values())
           ))
 
-    for path, v in path_hash_loc.items():
+    for path, (_, v) in path_hash_loc.items():
         assert sum(v.values()), (path, len(v))
         # print('#$', len(v), sum(v.values()), path)
 
-    for path, hash_loc in path_hash_loc.items():
+    for path, (_, hash_loc) in path_hash_loc.items():
         ext = get_ext(path)
         for hsh, loc in hash_loc.items():
             _, author = hash_date_author[hsh]
@@ -1298,7 +1325,7 @@ def get_tree_loc(path_loc):
 def detailed_loc(path_hash_loc, reports_dir):
 
     path_loc = {path: sum(loc for _, loc in hash_loc.items())
-                for path, hash_loc in path_hash_loc.items()}
+                for path, (_, hash_loc) in path_hash_loc.items()}
 
     dir_tree_loc = get_tree_loc(path_loc)
     dir_loc_frac = [(d, l, f) for d, (l, f) in dir_tree_loc.items()]
@@ -1351,7 +1378,7 @@ def get_top_authors(blame_map, report_map):
     # author_loc_dates = {author: loc, min date, max date} over all hashes
     author_loc_dates = defaultdict(lambda: [0, DATE_INF_POS, DATE_INF_NEG])
     i = 0
-    for hash_loc in path_hash_loc.values():
+    for _, hash_loc in path_hash_loc.values():
         for hsh, loc in hash_loc.items():
             date, author = hash_date_author[hsh]
             loc_dates = author_loc_dates[author]
@@ -1375,9 +1402,11 @@ def analyze_blame(max_date, blame_map, report_map):
 
     # hash_loc = {hsh: loc} over all hashes
     hash_loc = Counter()
-    for path, h_l in path_hash_loc.items():
+    for path, (_, h_l) in path_hash_loc.items():
         for hsh, loc in h_l.items():
             hash_loc[hsh] += loc
+            date, _ = hash_date_author[hsh]
+            assert date <= max_date, (hsh, date)
 
     # Populate the following dicts
     author_loc = Counter()              # {author: loc}
@@ -1576,12 +1605,10 @@ def write_oldest(oldest_path, author, hash_path_loc, date_hash_loc, hash_date_au
 
 
 def make_hash_path_loc(path_hash_loc):
-    # print('make_hash_path_loc 1: path_hash_loc=%d' % len(path_hash_loc))
     hash_path_loc = defaultdict(dict)
-    for path, hash_loc in path_hash_loc.items():
+    for path, (version, hash_loc) in path_hash_loc.items():
         for hsh, loc in hash_loc.items():
             hash_path_loc[hsh][path] = loc
-    # print('make_hash_path_loc 2: hash_path_loc=%d' % len(hash_path_loc))
     return hash_path_loc
 
 
@@ -1616,7 +1643,7 @@ def save_analysis(blame_map, report_map, analysis, _a_list, do_save, do_show,
     tsm, _ = history
     if tsm.max() - tsm.min() < n_min_days:
         print('%d days of activity < %d. Not reporting for author "%s"' % (
-              tsm.max() - tsm.min(), n_min_days,author))
+              tsm.max() - tsm.min(), n_min_days, author))
         return False
 
     # !@#$ need a better name than history
@@ -1686,8 +1713,9 @@ def create_reports(gitstatsignore, path_patterns, do_save, do_show, force,
         'name': git_name(),
         'date': code_date,
     }
+    max_date = code_date
 
-    _date = max(MAX_DATE, code_date)  # !@#$ Hack, Needed because merged code can be newer than branch
+    _date = max(MAX_DATE, max_date)  # !@#$ Hack, Needed because merged code can be newer than branch
 
     all_summary = repo_summary.copy()
     all_summary.update(rev_summary)
@@ -1713,20 +1741,20 @@ def create_reports(gitstatsignore, path_patterns, do_save, do_show, force,
     blame_map = BlameMap(repo_base_dir, repo_summary, rev_summary)
 
     if not force:
-        blame_map.load()
+        blame_map.load(max_date)
 
     changed = blame_map.update_data(file_list, force)
 
     for path in blame_map.path_hash_loc:
-        assert blame_map.path_hash_loc[path], os.path.abspath(path)
-        assert sum(blame_map.path_hash_loc[path].values()), os.path.abspath(path)
+        assert blame_map.path_hash_loc[path][1], os.path.abspath(path)
+        assert sum(blame_map.path_hash_loc[path][1].values()), os.path.abspath(path)
 
     if changed:
         blame_map.save(force)
 
     for path in blame_map.path_hash_loc:
-        assert blame_map.path_hash_loc[path], os.path.abspath(path)
-        assert sum(blame_map.path_hash_loc[path].values()), os.path.abspath(path)
+        assert blame_map.path_hash_loc[path][1], os.path.abspath(path)
+        assert sum(blame_map.path_hash_loc[path][1].values()), os.path.abspath(path)
 
     file_set = set(file_list)
     if blame_map.bad_files:
@@ -1748,6 +1776,7 @@ def create_reports(gitstatsignore, path_patterns, do_save, do_show, force,
 
     report_map_all = ReportMap(blame_map, blame_map.path_hash_loc, code_date, path_patterns,
                                reports_dir, file_set, author_pattern, ext_pattern)
+    _check_dates(max_date, blame_map.hash_date_author, report_map_all.path_hash_loc)
 
     author_loc_dates, top_authors = get_top_authors(blame_map, report_map_all)
 
@@ -1765,6 +1794,7 @@ def create_reports(gitstatsignore, path_patterns, do_save, do_show, force,
         report_map = ReportMap(blame_map, report_map_all.path_hash_loc, code_date, path_patterns,
                                reports_dir_author,
                                None, None, None, a_list)
+        _check_dates(max_date, blame_map.hash_date_author, report_map.path_hash_loc)
 
         analysis = analyze_blame(code_date, blame_map, report_map)
 
