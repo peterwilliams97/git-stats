@@ -10,7 +10,7 @@ conda update anaconda
 
 Tested with
 
-    python    : 2.7.10
+    python    : 2.7.10 and 3.5.1
     numpy     : 1.10.1
     matplotlib: 1.5.0
     pandas    : 0.17.1
@@ -22,6 +22,8 @@ Usage is [below](#code-agepy-usage).
 Analyzes the age of files in a git repository and writes some reports and draws some graphs about them.
 
 Writes reports in the directory structure given in [git.stats.tree.txt](https://github.com/peterwilliams97/git-stats/blob/master/examples/git.stats.tree.txt)
+
+NOTE: __LoC__ is short for __L__ines __o__f __C__ode.
 
 e.g. For repository [cpython](https://github.com/python/cpython.git)
 
@@ -45,6 +47,9 @@ This directory contains files that report on the age of `Guido van Rossum`'s `*.
 code in revision `d68ed6fc`, the `cpython` `2.7` branch on 2015-12-22.
 
 ##### 1) [code-age.png](https://github.com/peterwilliams97/git-stats/blob/master/examples/git.stats/cpython/reports/2015-12-22.4120e146.2_7/__c.__cpp.__h/Guido_van_Rossum/code-age.png) is a graph showing the age of the code in question.
+
+The horizontal axis is date and the vertical axis is LoC /day. This means the area under the curve
+between two dates is the LoC surviving from the period bounded by those datess.
 
 You can see that some of Guido's C code from 1991 survives in the current Python 2.7 revision as
 does code up to 2008.
@@ -151,6 +156,6 @@ This shows the lines of code in the revision being reported. (This table shown o
 
 * Copy code-age.py to your computer
 * Open a shell and cd to the root of the git repository you want to report
-* `python code-age.py`
+* `python code-age.py` NOTE: This can take hours to run a big repository as it blames every file in the repository.
 * The location of the reports directory will be written to stdout
 * Optionally try some patterns e.g. `python code-age.py '*.py'`, `python code-age.py docs`
