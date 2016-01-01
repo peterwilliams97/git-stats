@@ -118,8 +118,7 @@ Guido's last C code commit that survives in the 2.7 branch is from November 2008
 
        ...
 
-##### 5) [details.csv](https://github.com/peterwilliams97/git-stats/blob/master/examples/git.stats/cpython/reports/2015-12-22.4120e146.2_7/__c.__cpp.__h/Guido_van_Rossum/details.csv) attempts to show where
-the code is distributed through the source tree.
+##### 5) [details.csv](https://github.com/peterwilliams97/git-stats/blob/master/examples/git.stats/cpython/reports/2015-12-22.4120e146.2_7/__c.__cpp.__h/Guido_van_Rossum/details.csv) attempts to show where the code is distributed through the source tree.
 
 <table>
 <tr><th>dir</th><th>LoC</th><th>frac</th></tr>
