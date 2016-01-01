@@ -23,7 +23,7 @@ Analyzes the age of files in a git repository and writes some reports and draws 
 
 Writes reports in the directory structure given in [git.stats.tree.txt](https://github.com/peterwilliams97/git-stats/blob/master/examples/git.stats.tree.txt)
 
-NOTE: __LoC__ is short for __L__ines __o__f __C__ode.
+NOTE: __LoC__ is short for Lines of Code.
 
 e.g. For repository [cpython](https://github.com/python/cpython.git)
 
