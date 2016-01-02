@@ -18,8 +18,6 @@
       │       │       │   ├── details.csv     LoC in each directory in for these files and authors
       │       │       │   ├── newest.txt      List of newest commits for these files and authors
       │       │       │   └── oldest.txt      List of oldest commits for these files and authors
-
-
 """
 from __future__ import division, print_function
 import subprocess
@@ -40,6 +38,7 @@ import matplotlib.pylab as plt
 from matplotlib.pylab import cycler
 import bz2
 from multiprocessing import Pool, cpu_count
+from multiprocessing.pool import ThreadPool
 
 # Python 2 / 3 stuff
 PY2 = sys.version_info[0] < 3
@@ -61,8 +60,9 @@ except:
 TIMEZONE = 'Australia/Melbourne'    # The timezone used for all commit times. TODO Make configurable
 SHA_LEN = 8                         # The number of characters used when displaying git SHA-1 hashes
 STRICT_CHECKING = False             # For validating code.
-N_PROCESSES = max(1, cpu_count() - 1)  # Number of processes to use for blaming and other parallel
-                                       # tasks
+N_BLAME_PROCESSES = max(1, cpu_count() - 1)  # Number of processes to use for blaming
+N_SHOW_THREADS = 8                 # Number of threads for running the many git show commands
+DO_MULTIPROCESSING = True          # For test non-threaded peformance
 
 
 # Set graphing style
@@ -116,6 +116,36 @@ def lowpriority():
     else:
         os.nice(1)
 
+
+class ProcessPool(object):
+    """Package of Pool and ThreadPool for 'with' usage.
+    """
+    SINGLE = 0
+    THREAD = 1
+    PROCESS = 2
+
+    def __init__(self, process_type, n_pool):
+        if not DO_MULTIPROCESSING:
+            process_type = ProcessPool.SINGLE
+        self.process_type = process_type
+        if process_type != ProcessPool.SINGLE:
+            cls = ThreadPool if process_type == ProcessPool.THREAD else Pool
+            self.pool = cls(n_pool)
+
+    def __enter__(self):
+        return self
+
+    def imap_unordered(self, func, args_iter):
+        if self.process_type != ProcessPool.SINGLE:
+            return self.pool.imap_unordered(func, args_iter)
+        else:
+            return map(func, args_iter)
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if self.process_type != ProcessPool.SINGLE:
+            self.pool.terminate()
+
+
 def truncate_sha(sha):
     """The way we show git SHA-1 hashes in reports."""
     return sha[:SHA_LEN]
@@ -139,7 +169,7 @@ def to_timestamp(date_s):
 
 
 def delta_days(t0, t1):
-    """Return time from `t0` to `t1' in days where t0 and t1 are Timestamps
+    """Returns: time from `t0` to `t1' in days where t0 and t1 are Timestamps
         Returned value is signed (+ve if t1 later than t0) and fractional
     """
     return (t1 - t0).total_seconds() / 3600 / 24
@@ -238,6 +268,12 @@ def moving_average(series, window):
 
     ma = np.convolve(series, weights, mode='same')
     assert ma.size == series.size, ([ma.size, ma.dtype], [series.size, series.dtype], window)
+
+    sum_raw = series.sum()
+    sum_ma = ma.sum()
+    if sum_ma:
+        ma *= sum_raw / sum_ma
+
     return Series(ma, index=series.index)
 
 
@@ -257,7 +293,7 @@ RE_EXT_NUMBER = re.compile(r'^\.\d+$')
 
 
 def get_ext(path):
-    """Return extension of file `path`
+    """Returns: extension of file `path`
     """
     parts = os.path.splitext(path)
     if not parts:
@@ -452,9 +488,9 @@ def _debug_check_dates(max_date, sha_date_author, path_sha_loc):
         for sha, loc in sha_loc.items():
             if loc <= 1:
                 continue
-            assert sha in sha_date_author, (sha, path)
+            assert sha in sha_date_author, '%s not in sha_date_author' % [sha, path]
             date, _ = sha_date_author[sha]
-            assert date <= max_date, (sha, loc, [date, max_date], path)
+            assert date <= max_date, ('date > max_date', sha, loc, [date, max_date], path)
 
 
 class GitException(Exception):
@@ -518,6 +554,9 @@ def _extract_author_sha_loc(max_date, text, path):
         sha_loc[sha] += 1
         sha_date_author[sha] = (date, author)
 
+    if not sha_loc:
+        raise GitException('is empty')
+
     return sha_date_author, sha_loc
 
 
@@ -573,7 +612,7 @@ class Persistable(object):
             summary: A dict giving a summary of the data to be saved
             base_dir: Directory that summary, data and manifest are to be saved to
         """
-        assert 'TEMPLATE' in self.__class__.__dict__, self.__class__.__dict__
+        assert 'TEMPLATE' in self.__class__.__dict__, 'No TEMPLATE in %s' % self.__class__.__dict__
 
         self.base_dir = base_dir
         self.data_dir = Persistable.make_data_dir(base_dir)
@@ -689,10 +728,10 @@ class BlameState(object):
         if not STRICT_CHECKING:
             return
         for path, sha_loc in self.path_sha_loc.items():
-            assert path in self.path_set, path
+            assert path in self.path_set, '%s not in self.path_set' % path
             for sha, loc in sha_loc.items():
                 date, author = self.sha_date_author[sha]
-        assert set(self.path_sha_loc.keys()) | self.bad_path_set == self.path_set
+        assert set(self.path_sha_loc.keys()) | self.bad_path_set == self.path_set, 'path sets wrong'
 
     def __init__(self, repo_base_dir, repo_summary, rev_summary):
         """
@@ -828,6 +867,7 @@ class BlameState(object):
 
         peer_revisions.sort(key=lambda dir_rev: dir_rev[1]._rev_state.summary['date'])
 
+
         for i, (that_dir, that_rev) in enumerate(peer_revisions):
 
             if not remaining_path_set:
@@ -907,61 +947,59 @@ class BlameState(object):
         filenames = [(max_date, i, path) for i, path in enumerate(file_set)]
         filenames.sort(key=lambda dip: -os.path.getsize(dip[2]))
 
-        pool = Pool(N_PROCESSES)
-        for i, (path, h_d_a, sha_loc, e) in enumerate(
-                                    pool.imap_unordered(_task_extract_author_sha_loc, filenames)):
+        with ProcessPool(ProcessPool.PROCESS, N_BLAME_PROCESSES) as pool:
+            for i, (path, h_d_a, sha_loc, e) in enumerate(
+                pool.imap_unordered(_task_extract_author_sha_loc, filenames)):
 
-            if e is not None:
+                if e is not None:
 
-                apath = os.path.abspath(path)
-                self.bad_path_set.add(path)
+                    apath = os.path.abspath(path)
+                    self.bad_path_set.add(path)
 
-                if isinstance(e, GitException):
-                    if e.git_msg:
-                        if e.git_msg != 'is empty':
-                            print('    %s %s' % (apath, e.git_msg), file=sys.stderr)
-                    else:
-                        print('   %s cannot be blamed' % apath, file=sys.stderr)
-                    continue
-                elif isinstance(e, subprocess.CalledProcessError):
-                    if not os.path.exists(path):
-                        print('    %s no longer exists' % apath, file=sys.stderr)
+                    if isinstance(e, GitException):
+                        if e.git_msg:
+                            if e.git_msg != 'is empty':
+                                print('    %s %s' % (apath, e.git_msg), file=sys.stderr)
+                        else:
+                            print('   %s cannot be blamed' % apath, file=sys.stderr)
                         continue
-                    elif os.path.isdir(path):
-                        print('   %s is a directory' % apath, file=sys.stderr)
-                        continue
-                    elif stat.S_IXUSR & os.stat(path)[stat.ST_MODE]:
-                        print('   %s is an executable. e=%s' % (apath, e), file=sys.stderr)
-                        continue
-                raise
+                    elif isinstance(e, subprocess.CalledProcessError):
+                        if not os.path.exists(path):
+                            print('    %s no longer exists' % apath, file=sys.stderr)
+                            continue
+                        elif os.path.isdir(path):
+                            print('   %s is a directory' % apath, file=sys.stderr)
+                            continue
+                        elif stat.S_IXUSR & os.stat(path)[stat.ST_MODE]:
+                            print('   %s is an executable. e=%s' % (apath, e), file=sys.stderr)
+                            continue
+                    raise
 
-            self.sha_date_author.update(h_d_a)
-            self.path_sha_loc[path] = sha_loc
+                self.sha_date_author.update(h_d_a)
+                self.path_sha_loc[path] = sha_loc
 
-            if i - last_i >= 100:
-                duration = time.time() - start
+                if i - last_i >= 100:
+                    duration = time.time() - start
 
-                loc = sum(sum(sha_loc.values()) for sha_loc in self.path_sha_loc.values())
-                if loc != last_loc:
-                    print('%d of %d files (%.1f%%), %d bad, %d LoC, %d commits, %.1f secs, %s' % (
-                          i, n_files, 100 * i / n_files, i - blamed,
-                          loc - loc0,
-                          len(sha_date_author) - commits0,
-                          duration,
-                          procrustes(path, width=65)))
-                    sys.stdout.flush()
-                    last_loc = loc
-                    last_i = i
+                    loc = sum(sum(sha_loc.values()) for sha_loc in self.path_sha_loc.values())
+                    if loc != last_loc:
+                        print('%d of %d files (%.1f%%), %d bad, %d LoC, %d commits, %.1f secs, %s' % (
+                              i, n_files, 100 * i / n_files, i - blamed,
+                              loc - loc0,
+                              len(sha_date_author) - commits0,
+                              duration,
+                              procrustes(path, width=65)))
+                        sys.stdout.flush()
+                        last_loc = loc
+                        last_i = i
 
-            blamed += 1
+                blamed += 1
 
-            if STRICT_CHECKING:
-                _debug_check_dates(max_date, sha_date_author, self.path_sha_loc)
-                assert path in self.path_sha_loc, path
-                assert self.path_sha_loc[path], path
-                assert sum(self.path_sha_loc[path].values()), path
-
-        pool.terminate()
+                if STRICT_CHECKING:
+                    _debug_check_dates(max_date, sha_date_author, self.path_sha_loc)
+                    assert path in self.path_sha_loc, os.path.abspath(path)
+                    assert self.path_sha_loc[path], os.path.abspath(path)
+                    assert sum(self.path_sha_loc[path].values()), os.path.abspath(path)
 
         if STRICT_CHECKING:
             for path in file_set - self.bad_path_set:
@@ -1027,7 +1065,8 @@ def filter_path_sha_loc(blame_state, path_sha_loc, file_set=None, author_set=Non
     assert author_set is None or isinstance(author_set, set), type(author_set)
 
     if file_set:
-        path_sha_loc = {path: sha_loc for path, sha_loc in path_sha_loc.items()
+        path_sha_loc = {path: sha_loc
+                        for path, sha_loc in path_sha_loc.items()
                         if path in file_set}
 
     if STRICT_CHECKING:
@@ -1041,7 +1080,8 @@ def filter_path_sha_loc(blame_state, path_sha_loc, file_set=None, author_set=Non
         path_sha_loc = {path: {sha: loc for sha, loc in sha_loc.items()
                                if sha in sha_set}
                          for path, sha_loc in path_sha_loc.items()}
-        path_sha_loc = {path: sha_loc for path, sha_loc in path_sha_loc.items() if sha_loc}
+        path_sha_loc = {path: sha_loc
+                        for path, sha_loc in path_sha_loc.items() if sha_loc}
 
     if STRICT_CHECKING:
         for path in path_sha_loc:
@@ -1067,15 +1107,15 @@ def parallel_show_oneline(sha_iter):
         sha_iter: Iterable for some SHA-1 hashes
         Returns: {sha: text} over SHA-1 hashes sha in `sha_iter`. text is git_show_oneline output
     """
-    pool = Pool(N_PROCESSES)
     sha_text = {}
     exception = None
-    for sha, text, e in pool.imap(_task_show_oneline, sha_iter):
-        if e:
-            exception = e
-            break
-        sha_text[sha] = text
-    pool.terminate()
+    with ProcessPool(ProcessPool.THREAD, N_SHOW_THREADS) as pool:
+        for sha, text, e in pool.imap_unordered(_task_show_oneline, sha_iter):
+            if e:
+                exception = e
+                break
+            sha_text[sha] = text
+
     if exception:
         raise exception
     return sha_text
@@ -1335,7 +1375,7 @@ def find_peaks(ts_histo):
 
 #
 # Time series analysis
-#  !@#$ try different windows to get better peaks
+#  TODO: try different windows to get better peaks
 def _compute_histogram_and_peaks(max_date, date_list, loc_list, window=60):
     """Returns: ts_histo, peak_idx
 
@@ -1353,7 +1393,7 @@ def _compute_histogram_and_peaks(max_date, date_list, loc_list, window=60):
         assert max(date_list) <= max_date, (max(date_list), max_date)
 
     ts_raw = Series(loc_list, index=date_list)  # TODO: dates may not be unique, guarantee this
-    ts_days = ts_raw.resample('D', how='mean')  # 'D' = Day
+    ts_days = ts_raw.resample('D', how='sum')  # 'D' = Day
     ts_days = ts_days.fillna(0)
 
     ts_histo = moving_average(ts_days, window) if window else ts_days
@@ -1394,7 +1434,7 @@ def _key_ixy_x(i, x, y):
 
 
 def _get_xy_text(xy_plot, txt_width, txt_height):
-    """Return  positions of text labels for points `xy_plot`
+    """Returns: positions of text labels for points `xy_plot`
         1) Offset text upwards by txt_width
         2) Remove collisions
         NOTE: xy_plot MUST be sorted by y when this function is called
@@ -2006,5 +2046,6 @@ def main():
                          options.n_min_days)
 
 if __name__ == '__main__':
+    print('N_BLAME_PROCESSES=%d' % N_BLAME_PROCESSES)
     main()
     print()
