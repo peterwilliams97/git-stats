@@ -100,20 +100,21 @@ def _is_windows():
 IS_WINDOWS = _is_windows()
 
 
-def lowpriority():
-    """ Set the priority of the process to below-normal.
-        http://stackoverflow.com/questions/1023038/change-process-priority-in-python-cross-platform
-    """
-    if IS_WINDOWS:
-        import win32api
-        import win32process
-        import win32con
+if IS_WINDOWS:
+    import win32api
+    import win32process
+    import win32con
 
+    def lowpriority():
+        """ Set the priority of the process to below-normal.
+            http://stackoverflow.com/questions/1023038/change-process-priority-in-python-cross-platform
+        """
         pid = win32api.GetCurrentProcessId()
         handle = win32api.OpenProcess(win32con.PROCESS_ALL_ACCESS, True, pid)
         win32process.SetPriorityClass(handle, win32process.BELOW_NORMAL_PRIORITY_CLASS)
 
-    else:
+else:
+    def lowpriority():
         os.nice(1)
 
 
@@ -1148,6 +1149,56 @@ def make_report_dir(base_dir, default_name, components, max_len=None):
     return path_join(base_dir, name)[:max_len]
 
 
+def get_totals(path_sha_loc):
+    """Returns: total numbers of files, commits, LoC for files in `path_sha_loc`
+    """
+    all_commits = set()
+    total_loc = 0
+    for sha_loc in path_sha_loc.values():
+        all_commits.update(sha_loc.keys())
+        total_loc += sum(sha_loc.values())
+
+    return len(path_sha_loc), len(all_commits), total_loc
+
+
+def write_manifest(blame_state, path_sha_loc, report_dir, name_description, title):
+    """Write a README file in `report_dir`
+    """
+
+    total_files, total_commits, total_loc = get_totals(path_sha_loc)
+    totals = 'Totals: %d files, %d commits, %d LoC' % (total_files, total_commits, total_loc)
+
+    repo_summary = blame_state._repo_state.summary
+    rev_summary = blame_state._rev_state.summary
+    details = 'Revision Details\n'\
+              '----------------\n'\
+              'Repository:  %s (%s)\n'\
+              'Date:        %s\n'\
+              'Description: %s\n'\
+              'SHA-1 hash   %s\n' % (
+                  repo_summary['remote_name'], repo_summary['remote_url'],
+                  date_str(rev_summary['date']),
+                  rev_summary['description'],
+                  rev_summary['revision_sha'])
+
+    with open(path_join(report_dir, 'README'), 'wt') as f:
+        def put(s=''):
+            f.write('%s\n' % s)
+
+        put(title)
+        put('=' * len(title))
+        put()
+        put(totals)
+        put()
+        if details:
+            put(details)
+            put()
+        put('Files in this Directory')
+        put('-----------------------')
+        for name, description in sorted(name_description.items()):
+            put('%-12s: %s' % (name, description))
+
+
 def compute_tables(blame_state, path_sha_loc):
     """Compute summary tables over whole report showing number of files and LoC by author and
         file extension.
@@ -1278,7 +1329,7 @@ def detailed_loc(path_sha_loc):
     return DataFrame(dir_loc_frac, columns=['dir', 'LoC', 'frac'])
 
 
-def save_summary_tables(blame_state, path_sha_loc, reports_dir):
+def save_summary_tables(blame_state, path_sha_loc, report_dir):
     """Save tables of number of files and LoC both by author and file extension to
         `author_ext_files.csv` and `author_ext_loc.csv' respectively.
     """
@@ -1288,13 +1339,21 @@ def save_summary_tables(blame_state, path_sha_loc, reports_dir):
         return
 
     def make_path(key):
-        return path_join(reports_dir, '%s.csv' % key)
+        return path_join(report_dir, '%s.csv' % key)
 
-    mkdir(reports_dir)
+    mkdir(report_dir)
 
     df_author_ext_files, df_author_ext_loc = compute_tables(blame_state, path_sha_loc)
     df_append_totals(df_author_ext_files).to_csv(make_path('author_ext_files'))
     df_append_totals(df_author_ext_loc).to_csv(make_path('author_ext_loc'))
+
+    name_description = {
+        'author_ext_files': 'Number of files of given extension in which author has code',
+        'author_ext_loc': 'Number of LoC author in files of given extension by author'
+    }
+
+    title = 'Summary of File Counts and LoC by Author and File Extension.'
+    write_manifest(blame_state, path_sha_loc, report_dir, name_description, title)
 
 
 DATE_INF_NEG = Timestamp('1911-11-22 11:11:11 -0700')
@@ -1364,7 +1423,9 @@ def find_peaks(ts_histo):
     MIN_PEAK_HEIGHT = 5  # !@#$ Depends on averaging Window
 
     # TODO: Tune np.arange(2, 10) * 10 to data
-    peak_idx = signal.find_peaks_cwt(ts_histo, np.arange(2, 10) * 10)
+    width = delta_days(ts_histo.index.min(), ts_histo.index.max())
+    width = min(max(width, 10), 100)
+    peak_idx = signal.find_peaks_cwt(ts_histo, np.arange(2, 10) * width / 10)
 
     return [i for i in peak_idx
             if (delta_days(ts_histo.index[0], ts_histo.index[i]) >= MIN_PEAK_DAYS and
@@ -1674,7 +1735,7 @@ class AuthorReport(object):
         filter day, write reports and plot graphs so they _should_ be fast.
 
         Members:
-            reports_dir: Directory that report is to be saved to:
+            report_dir: Directory that report is to be saved to:
             path_sha_loc: {path: {sha: loc}} over paths of all files in report where
                            {sha: loc} is a dict of LoC for each SHA-1 hash that is in the blame
                            of `path`
@@ -1689,12 +1750,13 @@ class AuthorReport(object):
 
         self.blame_state = blame_state
         self.report_name = make_report_name('[all-authors]', author_set)
-        self.reports_dir = make_report_dir(files_report_dir, '[all-authors]', author_set,
-                                           PATH_MAX - 20)
+        self.report_dir = make_report_dir(files_report_dir, '[all-authors]', author_set,
+                                          PATH_MAX - 20)
         self.files_report_name = files_report_name
         self.max_date = max_date
         self.author_set = author_set
         self.path_sha_loc = filter_path_sha_loc(blame_state, path_sha_loc, author_set=author_set)
+        self.name_description = {}
 
         if STRICT_CHECKING:
             for path in path_sha_loc:
@@ -1703,7 +1765,7 @@ class AuthorReport(object):
 
             assert path_sha_loc, author_set
             _debug_check_dates(max_date, blame_state.sha_date_author, path_sha_loc)
-            assert ':' not in self.reports_dir[2:], self.reports_dir
+            assert ':' not in self.report_dir[2:], self.report_dir
 
     def write_legend(self, legend_path, histo_peaks, n_top_commits):
 
@@ -1778,13 +1840,12 @@ class AuthorReport(object):
             <name>.png
             <name>.txt
         """
-        # reports_dir = self.reports_dir
         blame_state = self.blame_state
 
-        mkdir(self.reports_dir)
+        mkdir(self.report_dir)
 
         self.date_sha_loc = aggregate_author_date_sha_loc(self.author_date_sha_loc,
-                                                            self.author_set)
+                                                          self.author_set)
 
         histo_peaks = make_histo_peaks(self.max_date, self.author_date_sha_loc, n_peaks,
                                        self.author_set)
@@ -1796,15 +1857,21 @@ class AuthorReport(object):
             return False
 
         if do_save:
-            graph_path = path_join(self.reports_dir, 'code-age.png')
-            legend_path = path_join(self.reports_dir, 'code-age.txt')
-            newest_path = path_join(self.reports_dir, 'newest.txt')
-            oldest_path = path_join(self.reports_dir, 'oldest.txt')
+            graph_path = path_join(self.report_dir, 'code-age.png')
+            legend_path = path_join(self.report_dir, 'code-age.txt')
+            newest_path = path_join(self.report_dir, 'newest.txt')
+            oldest_path = path_join(self.report_dir, 'oldest.txt')
 
             sha_path_loc = make_sha_path_loc(blame_state.path_sha_loc)
             self.write_legend(legend_path, histo_peaks, n_top_commits)
             self.write_newest(newest_path, sha_path_loc, n_newest_oldest, n_files)
             self.write_oldest(oldest_path, sha_path_loc, n_newest_oldest, n_files)
+
+            self.name_description['code-age.png'] = 'Graph of code age'
+            self.name_description['code-age.txt'] = 'Commits around peaks in code-age.png'
+            self.name_description['newest.txt'] = 'Newest commits'
+            self.name_description['oldest.txt'] = 'Oldest surviving commits'
+
         else:
             graph_path = None
 
@@ -1821,10 +1888,18 @@ class AuthorReport(object):
         if not self.path_sha_loc:
             print('No files to process')
 
-        details_path = path_join(self.reports_dir, 'details.csv')
+        details_path = path_join(self.report_dir, 'details.csv')
         df_dir_tree_loc = detailed_loc(self.path_sha_loc)
         df_dir_tree_loc.to_csv(details_path)
+        self.name_description['details.csv'] = 'Distribution of LoC over the directory structure'
         print('Details: %s' % details_path)
+
+    def write_manifest(self):
+        total_loc, total_commits, total_files = get_totals(self.path_sha_loc)
+        title = 'Code Age Report for files %s and authors %s.' % (
+                    self.files_report_name, self.report_name)
+        write_manifest(self.blame_state, self.path_sha_loc, self.report_dir, self.name_description,
+                       title)
 
 
 def _show_summary(repo_summary, rev_summary):
@@ -1863,8 +1938,9 @@ def filter_bad_files(blame_state, file_set):
     return file_set
 
 
+
 def create_files_reports(gitstatsignore, path_patterns, do_save, do_show, force, author_pattern,
-   n_top_authors, n_peaks, n_top_commits, n_newest_oldest, n_files, n_min_days):
+    n_top_authors, n_peaks, n_top_commits, n_newest_oldest, n_files, n_min_days):
     """Creates a set of reports for a specified pattern of files in the current revision of the git
         repository this script is being run from.
 
@@ -1974,7 +2050,7 @@ def create_files_reports(gitstatsignore, path_patterns, do_save, do_show, force,
 
     # path_sha_loc is for files matched by file_set and author_set
     path_sha_loc = filter_path_sha_loc(blame_state, blame_state.path_sha_loc,
-                                         file_set=file_set, author_set=all_author_set)
+                                       file_set=file_set, author_set=all_author_set)
 
     save_summary_tables(blame_state, path_sha_loc, files_report_dir)
 
@@ -1993,13 +2069,15 @@ def create_files_reports(gitstatsignore, path_patterns, do_save, do_show, force,
             continue
 
         author_report.save_details_table()
-        author_report_list.append(os.path.abspath(author_report.reports_dir))
+        author_report.write_manifest()
+
+        author_report_list.append(os.path.abspath(author_report.report_dir))
 
     print('+' * 80)
     print('%2d reports directories' % len(author_report_list))
     for i, author_dir in enumerate(author_report_list):
         print('%2d: %s' % (i, author_dir))
-    print('    %s' % os.path.abspath(rev_dir))
+    print('    %s' % os.path.abspath(files_report_dir))
     print('description="%s"' % description)
 
 
