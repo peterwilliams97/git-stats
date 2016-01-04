@@ -16,8 +16,8 @@
       │       │       │   ├── code-age.png    Graph of code age. LoC / day vs date
       │       │       │   ├── code-age.txt    List of commits in the peaks in the code-age.png graph
       │       │       │   ├── details.csv     LoC in each directory in for these files and authors
-      │       │       │   ├── newest.txt      List of newest commits for these files and authors
-      │       │       │   └── oldest.txt      List of oldest commits for these files and authors
+      │       │       │   ├── newest-commits.txt      List of newest commits for these files and authors
+      │       │       │   └── oldest-commits.txt      List of oldest commits for these files and authors
 """
 from __future__ import division, print_function
 import subprocess
@@ -1855,8 +1855,8 @@ class AuthorReport(object):
         if do_save:
             graph_path = path_join(self.report_dir, 'code-age.png')
             legend_path = path_join(self.report_dir, 'code-age.txt')
-            newest_path = path_join(self.report_dir, 'newest.txt')
-            oldest_path = path_join(self.report_dir, 'oldest.txt')
+            newest_path = path_join(self.report_dir, 'newest-commits.txt')
+            oldest_path = path_join(self.report_dir, 'oldest-commits.txt')
 
             sha_path_loc = make_sha_path_loc(blame_state.path_sha_loc)
             self.write_legend(legend_path, histo_peaks, n_top_commits)
@@ -1865,8 +1865,8 @@ class AuthorReport(object):
 
             self.name_description['code-age.png'] = 'Graph of code age'
             self.name_description['code-age.txt'] = 'Commits around peaks in code-age.png'
-            self.name_description['newest.txt'] = 'Newest commits'
-            self.name_description['oldest.txt'] = 'Oldest surviving commits'
+            self.name_description['newest-commits.txt'] = 'Newest commits'
+            self.name_description['oldest-commits.txt'] = 'Oldest surviving commits'
 
         else:
             graph_path = None
@@ -1954,8 +1954,8 @@ def create_files_reports(gitstatsignore, path_patterns, do_save, do_show, force,
       │       │       │   ├── code-age.png    Graph of code age. LoC / day vs date
       │       │       │   ├── code-age.txt    List of commits in the code-age.png graph peaks
       │       │       │   ├── details.csv     LoC in each directory
-      │       │       │   ├── newest.txt      List of newest commits
-      │       │       │   └── oldest.txt      List of oldest commits
+      │       │       │   ├── newest-commits.txt      List of newest commits
+      │       │       │   └── oldest-commits.txt      List of oldest commits
                           ... More reports for other authors and one for [all-authors]
                       ... More groups of reports for other file patterns
                    ... More groups of groups of reports for other revisions
@@ -1976,8 +1976,8 @@ def create_files_reports(gitstatsignore, path_patterns, do_save, do_show, force,
         n_top_commits: Number of top commits to list for each autho r. These are the highest peaks
                        in the smoothed histogram of commits in the code-age.png graph in
                        descending order of LoC
-        n_newest_oldest: Number of commits to show in newest.txt and oldest.txt
-        n_files: Number of fies to show for each commit in newest.txt and oldest.txt
+        n_newest_oldest: Number of commits to show in newest-commits.txt and oldest-commits.txt
+        n_files: Number of fies to show for each commit in newest-commits.txt and oldest-commits.txt
         n_min_days: Minimum number of days of commits required for an author to be reported on
     """
 
