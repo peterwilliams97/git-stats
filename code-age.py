@@ -1301,6 +1301,8 @@ def get_tree_loc(path_loc):
         for child in dir_tree[parent]:
             if child in dir_tree_loc:
                 dir_tree_loc_frac[child] = tuple((tree_loc[child], tree_loc[child] / loc))
+    # Seems more natural to set root fraction to 1.0
+    dir_tree_loc_frac[root] = tuple((tree_loc[root], 1.0))
 
     return dir_tree_loc_frac
 
