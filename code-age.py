@@ -10,7 +10,7 @@
       ├── cpython                             Directory for https://github.com/python/cpython.git
       │   └── reports
       │       ├── 2011-03-06.d68ed6fc.2_0     Revision `d68ed6fc` which was created on 2011-03-06 on
-      │       │   │                           on branch `2.0`.
+      │       │   │                           branch `2.0`.
       │       │   └── __c.__cpp.__h           Report on *.c, *.cpp and *.h files in this revision
       │       │       ├── Guido_van_Rossum    Sub-report on author `Guido van Rossum`
       │       │       │   ├── code-age.png    Graph of code age. LoC / day vs date
@@ -130,8 +130,8 @@ class ProcessPool(object):
             process_type = ProcessPool.SINGLE
         self.process_type = process_type
         if process_type != ProcessPool.SINGLE:
-            cls = ThreadPool if process_type == ProcessPool.THREAD else Pool
-            self.pool = cls(n_pool)
+            clazz = ThreadPool if process_type == ProcessPool.THREAD else Pool
+            self.pool = clazz(n_pool)
 
     def __enter__(self):
         return self
@@ -589,8 +589,8 @@ class Persistable(object):
                 manifest: a dict of sizes of objects in a catalog
         b) loads them from disk
 
-        Derived classes must contain a dict data member called `TEMPLATE` that gives the keys
-        of the data members to save / load and default constructors for each key.
+        Derived classes must contain a dict data member called `TEMPLATE` that gives the keys of the
+        data members to save / load and default constructors for each key.
     """
 
     @staticmethod
@@ -984,8 +984,8 @@ class BlameState(object):
 
                     loc = sum(sum(sha_loc.values()) for sha_loc in self.path_sha_loc.values())
                     if loc != last_loc:
-                        print('%d of %d files (%.1f%%), %d bad, %d LoC, %d commits, %.1f secs, %s' % (
-                              i, n_files, 100 * i / n_files, i - blamed,
+                        print('%d of %d files (%.1f%%), %d bad, %d LoC, %d commits, %.1f secs, %s' %
+                              (i, n_files, 100 * i / n_files, i - blamed,
                               loc - loc0,
                               len(sha_date_author) - commits0,
                               duration,
@@ -1011,7 +1011,7 @@ class BlameState(object):
         print('~' * 80)
         duration = time.time() - start
         loc = sum(sum(sha_loc.values()) for sha_loc in self.path_sha_loc.values())
-        print('%d files,%d blamed,%d lines,%d commits,dt=%.1f' % (len(file_set), blamed,
+        print('%d files,%d blamed,%d lines,%d commits,%.1f seconds' % (len(file_set), blamed,
               loc, len(sha_date_author), duration))
 
     def update_data(self, file_set, force):
@@ -1124,7 +1124,7 @@ def parallel_show_oneline(sha_iter):
 
 def make_sha_path_loc(path_sha_loc):
     """path_sha_loc: {path: {sha: loc}}
-       Returns: {sha: {path: loc}}    }
+       Returns: {sha: {path: loc}}
     """
     sha_path_loc = defaultdict(dict)
     for path, sha_loc in path_sha_loc.items():
@@ -1352,7 +1352,7 @@ def save_summary_tables(blame_state, path_sha_loc, report_dir):
         'author_ext_loc': 'Number of LoC author in files of given extension by author'
     }
 
-    title = 'Summary of File Counts and LoC by Author and File Extension.'
+    title = 'Summary of File Counts and LoC by Author and File Extension'
     write_manifest(blame_state, path_sha_loc, report_dir, name_description, title)
 
 
@@ -1731,8 +1731,8 @@ def put_newest_oldest(f, author, sha_path_loc, date_sha_loc, sha_date_author, n_
 
 
 class AuthorReport(object):
-    """AuthorReport's contain data for reports. Unlike BlameMaps they don't make git calls, they only
-        filter day, write reports and plot graphs so they _should_ be fast.
+    """AuthorReport's contain data for reports. Unlike BlameMaps they don't make git calls, they
+        only filter day, write reports and plot graphs so they _should_ be fast.
 
         Members:
             report_dir: Directory that report is to be saved to:
@@ -1769,8 +1769,7 @@ class AuthorReport(object):
 
     def write_legend(self, legend_path, histo_peaks, n_top_commits):
 
-        loc_auth, peak_ixy_commits = get_peak_commits(self.sha_loc, self.date_sha_loc,
-                                                      histo_peaks)
+        loc_auth, peak_ixy_commits = get_peak_commits(self.sha_loc, self.date_sha_loc, histo_peaks)
         peak_ixy_commits.sort(key=lambda k: _key_ixy_x(*k[0]))
 
         sha_gen = (sha for _, (_, _, this_sha_list) in peak_ixy_commits
@@ -1781,7 +1780,7 @@ class AuthorReport(object):
         with open(legend_path, 'wt') as f:
 
             def put(s):
-                f.write('%s\n' % s.encode('utf-8'))
+                f.write('%s\n' % s)
 
             put('=' * 80)
             put('%s: %d peaks %d LoC' % (self.report_name, len(peak_ixy_commits), loc_auth))
@@ -1793,20 +1792,17 @@ class AuthorReport(object):
                 for sha in sorted(this_sha_list[:n_top_commits],
                                   key=lambda k: self.blame_state.sha_date_author[k][0]):
                     put('%5d LoC, %s %s' % (self.sha_loc[sha],
-                        date_str(self.blame_state.sha_date_author[sha][0]),
-                        sha_text[sha]))
+                        date_str(self.blame_state.sha_date_author[sha][0]), sha_text[sha]))
 
     def write_newest(self, newest_path, sha_path_loc, n_commits, n_files):
         with open(newest_path, 'wt') as f:
             put_newest_oldest(f, self.report_name, sha_path_loc, self.date_sha_loc,
-                              self.blame_state.sha_date_author, n_commits,
-                              n_files, True)
+                              self.blame_state.sha_date_author, n_commits, n_files, True)
 
     def write_oldest(self, oldest_path, sha_path_loc, n_commits, n_files):
         with open(oldest_path, 'wt') as f:
             put_newest_oldest(f, self.report_name, sha_path_loc, self.date_sha_loc,
-                              self.blame_state.sha_date_author, n_commits,
-                              n_files, False)
+                              self.blame_state.sha_date_author, n_commits, n_files, False)
 
     def analyze_blame(self):
         """Compute derived member variables
@@ -1936,7 +1932,6 @@ def filter_bad_files(blame_state, file_set):
               len(blame_state.bad_path_set & file_set)))
         file_set = good_file_set
     return file_set
-
 
 
 def create_files_reports(gitstatsignore, path_patterns, do_save, do_show, force, author_pattern,
@@ -2070,8 +2065,9 @@ def create_files_reports(gitstatsignore, path_patterns, do_save, do_show, force,
 
         author_report.save_details_table()
         author_report.write_manifest()
-
         author_report_list.append(os.path.abspath(author_report.report_dir))
+        sys.stdout.flush()
+
 
     print('+' * 80)
     print('%2d reports directories' % len(author_report_list))
