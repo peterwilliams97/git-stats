@@ -5,6 +5,7 @@ Compute and display statistics of git repositories
 A scientific Python distribution such as Anaconda.
 
 e.g. Install Anaconda then
+
     conda update conda
     conda update anaconda
 
