@@ -2,11 +2,11 @@
 Compute and display statistics of git repositories
 
 # Requirements
-Scientific Python distribution such as Anaconda
+A scientific Python distribution such as Anaconda.
 
 e.g. Install Anaconda then
-conda update conda
-conda update anaconda
+    conda update conda
+    conda update anaconda
 
 Tested with
 
@@ -15,75 +15,131 @@ Tested with
     matplotlib: 1.5.0
     pandas    : 0.17.1
 
-# [code-age](https://github.com/peterwilliams97/git-stats/blob/master/code-age.py)
+You can check your versions with [version.py](https://github.com/peterwilliams97/git-stats/blob/master/version.py).
 
-Usage is [below](#code-agepy-usage).
+git-stats currently contains only one analysis script, [code-age.py](https://github.com/peterwilliams97/git-stats/blob/master/code-age.py).
 
-Analyzes the age of files in a git repository and writes some reports and draws some graphs about them.
+# [code-age.py](https://github.com/peterwilliams97/git-stats/blob/master/code-age.py)
 
-Writes reports in the directory structure given in [git.stats.tree.txt](https://github.com/peterwilliams97/git-stats/blob/master/examples/git.stats.tree.txt)
+### usage
+
+* Copy code-age.py to your computer
+* Open a shell and cd to the root of the git repository you want to report
+* `python code-age.py` NOTE: This can take hours to run a big repository as it blames every file in the repository.
+* The location of the reports directory will be written to stdout
+* Optionally try some patterns e.g. `python code-age.py '*.py'`, `python code-age.py docs`
+
+code-age.py analyzes the age of files in a git repository and writes some reports and draws some graphs about them. It writes reports in the directory structure given in [git.stats.tree.txt](https://github.com/peterwilliams97/git-stats/blob/master/examples/git.stats.tree.txt)
 
 NOTE: __LoC__ is short for Lines of Code.
 
-e.g. For repository [cpython](https://github.com/python/cpython.git)
+e.g. For repository [git](https://github.com/python/cpython.git), which is a github mirror off the git source code:
 
     [root]                                    Defaults to ~/git.stats
-      ├── cpython                             Directory for https://github.com/python/cpython.git
-      │   └── reports
-      │       ├── 2015-12-22.4120e146.2_7     Revision `4120e146` which was created on 2015-12-22 on
-      │       │   │                           on branch `2.7`.
-      │       │   └── __c.__cpp.__h           Report on *.c, *.cpp and *.h files in this revision
-      │       │       ├── Guido_van_Rossum    Sub-report on author `Guido van Rossum`
-      │       │       │   ├── code-age.png    Graph of code age. LoC / day vs date
-      │       │       │   ├── code-age.txt    List of commits in the peaks in the code-age.png graph
-      │       │       │   ├── details.csv     LoC in each directory in for these files and authors
-      │       │       │   ├── newest.txt      List of newest commits for these files and authors
-      │       │       │   └── oldest.txt      List of oldest commits for these files and authors
+      └── git                                 Directory for https://github.com/git/git.git
+          └── reports
+              └── 2015-12-29.28274d02.master  Revision 28274d02 which was created on 2015-12-22 on
+                  │                           on branch "master".
+                  └── [all-files]             Report on all files in this revision
+                      ├── README              Summary of files in [all-files]
+                      ├── author_ext_files.csv Number of files of given extension in which author has code
+                      ├── author_ext_loc.csv  Number of LoC author in files of given extension by author
+                      ├── [all-authors]       Sub-report on all authors
+                      │   ├── README          Summary of files in [all-authors]
+                      │   ├── code-age.png    Graph of code age. LoC / day vs date
+                      │   ├── code-age.txt    List of commits in the peaks in the code-age.png graph
+                      │   ├── details.csv     LoC in each directory in for these files and authors
+                      │   ├── newest-commits.txt List of newest commits for these files and authors
+                      │   └── oldest-commits.txt List of oldeswest commits for these files and authors
+                ....
+                      ├── Alex_Henrie         Sub-report on author Alex Henrie
+                      │   ├── README
+                      │   ├── code-age.png
+                      │   ├── code-age.txt
+                      │   ├── details.csv
+                      │   ├── newest.txt
+                      │   └── oldest.txt
 
 
-### A closer look at [2015-12-22.4120e146.2_7/__c.__cpp.__h/Guido_van_Rossum/](https://github.com/peterwilliams97/git-stats/tree/master/examples/git.stats/cpython/reports/2015-12-22.4120e146.2_7/__c.__cpp.__h/Guido_van_Rossum)
+### Top level files [2015-12-29.28274d02.master/\[all-files\]](https://github.com/peterwilliams97/git-stats-examples/tree/master/examples/git.stats/git/reports/2015-12-29.28274d02.master/%5Ball-files%5D/)
 
-This directory contains files that report on the age of `Guido van Rossum`'s `*.c`, `*.cpp` and `*.h`
-code in revision `d68ed6fc`, the `cpython` `2.7` branch on 2015-12-22.
+##### 1) [README](https://github.com/peterwilliams97/git-stats-examples/tree/master/examples/git.stats/git/reports/2015-12-29.28274d02.master/%5Ball-files%5D/READ)
 
-##### 1) [code-age.png](https://github.com/peterwilliams97/git-stats/blob/master/examples/git.stats/cpython/reports/2015-12-22.4120e146.2_7/__c.__cpp.__h/Guido_van_Rossum/code-age.png) is a graph showing the age of the code in question.
+This file contains summary information about this report.
+
+    Summary of File Counts and LoC by Author and File Extension
+    ===========================================================
+
+    Totals: 2806 files, 23743 commits, 764802 LoC
+
+    Revision Details
+    ----------------
+    Repository:  git (https://github.com/git/git.git)
+    Date:        2015-12-29
+    Description: master
+    SHA-1 hash   28274d02c489f4c7e68153056e9061a46f62d7a0
+
+
+##### 2) [author_ext_files.csv](https://github.com/peterwilliams97/git-stats-examples/tree/master/examples/git.stats/git/reports/2015-12-29.28274d02.master/%5Ball-files%5D/author_ext_files.csv)
+
+This shows the number of files in which each author has one or more lines of code in the revision by extension and author.
+being reported. (This table shown on this page is truncated. [author_ext_files.csv](https://github.com/peterwilliams97/git-stats-examples/tree/master/examples/git.stats/git/reports/2015-12-29.28274d02.master/%5Ball-files%5D/author_ext_files.csv) has the full table.)
+
+NOTE: The numbers of files in the Total row and column are __not__ the number of files in the repository. They are the total numbers of files in which each author has one or more lines of
+code.
+
+<table><tr><th></th><th>Total</th><th>.c</th><th>.sh</th><th>.txt</th><th>.h</th></tr><tr><th>Total</th><th>40742.0</th><th>14352.0</th><th>9457.0</th><th>7276.0</th><th>2710.0</th></tr><tr><th>Junio C Hamano</th><th>7747.0</th><th>2779</th><th>1713</th><th>1973</th><th>504</th></tr><tr><th>Jeff King</th><th>3070.0</th><th>1479</th><th>853</th><th>296</th><th>291</th></tr><tr><th>Nguyễn Thái Ngọc Duy</th><th>1680.0</th><th>994</th><th>226</th><th>174</th><th>210</th></tr><tr><th>Shawn O. Pearce</th><th>1254.0</th><th>384</th><th>352</th><th>99</th><th>55</th></tr><tr><th>Jonathan Nieder</th><th>1159.0</th><th>300</th><th>373</th><th>305</th><th>62</th></tr><tr><th>Linus Torvalds</th><th>1088.0</th><th>770</th><th>78</th><th>16</th><th>136</th></tr><tr><th>Johannes Schindelin</th><th>1022.0</th><th>458</th><th>298</th><th>103</th><th>92</th></tr><tr><th>René Scharfe</th><th>761.0</th><th>514</th><th>104</th><th>60</th><th>73</th></tr><tr><th>Michael Haggerty</th><th>707.0</th><th>437</th><th>106</th><th>56</th><th>70</th></tr><tr><th>Thomas Rast</th><th>696.0</th><th>171</th><th>151</th><th>193</th><th>34</th></tr></table>
+
+This shows the number of files in which each author has one or more lines of code in the revision
+being reported. (This table shown on this page is truncated. [author_ext_files.csv](https://github.com/peterwilliams97/git-stats-examples/tree/master/examples/git.stats/git/reports/2015-12-29.28274d02.master/%5Ball-files%5D/author_ext_files.csv) has the full table.)
+
+##### 3) [author_ext_loc.csv](https://github.com/peterwilliams97/git-stats-examples/tree/master/examples/git.stats/git/reports/2015-12-29.28274d02.master/%5Ball-files%5D/author_ext_loc.csv)
+
+
+This shows the lines of code in the revision being reported by extension and author. (The table shown on this page is
+truncated. author_ext_loc.csv](https://github.com/peterwilliams97/git-stats-examples/tree/master/examples/git.stats/git/reports/2015-12-29.28274d02.master/%5Ball-files%5D/author_ext_loc.csv) has the full table.)
+
+<table><tr><th></th><th>Total</th><th>.c</th><th>.sh</th><th>.po</th><th>.txt</th></tr><tr><th>Total</th><th>764802.0</th><th>198828.0</th><th>172727.0</th><th>159684.0</th><th>81591.0</th></tr><tr><th>Junio C Hamano</th><th>115080.0</th><th>37433</th><th>27753</th><th>6220</th><th>28929</th></tr><tr><th>Jeff King</th><th>31776.0</th><th>13134</th><th>11724</th><th>0</th><th>3175</th></tr><tr><th>Jiang Xin</th><th>24649.0</th><th>1170</th><th>718</th><th>11256</th><th>81</th></tr><tr><th>Shawn O. Pearce</th><th>24636.0</th><th>5392</th><th>4748</th><th>1519</th><th>2353</th></tr><tr><th>Nguyễn Thái Ngọc Duy</th><th>20908.0</th><th>13226</th><th>5499</th><th>0</th><th>1233</th></tr><tr><th>Peter Krefting</th><th>16243.0</th><th>4</th><th>11</th><th>15718</th><th>0</th></tr><tr><th>Alexander Shopov</th><th>16182.0</th><th>0</th><th>0</th><th>16149</th><th>29</th></tr><tr><th>Johannes Schindelin</th><th>15963.0</th><th>7531</th><th>4996</th><th>0</th><th>1345</th></tr><tr><th>Jonathan Nieder</th><th>15266.0</th><th>3111</th><th>6625</th><th>0</th><th>1914</th></tr><tr><th>Ævar Arnfjörð Bjarmason</th><th>14688.0</th><th>11093</th><th>1306</th><th>93</th><th>107</th></tr></table>
+
+
+
+### A closer look at [2015-12-29.28274d02.master/\[all-files\]/\[all-authors\]](https://github.com/peterwilliams97/git-stats-examples/tree/master/examples/git.stats/git/reports/2015-12-29.28274d02.master/%5Ball-files%5D/%5Ball-authors%5D)
+
+This directory contains files that report on the age of all authors code for all files (i.e. every
+file) in revision `28274d02`, the `git` repository `master` branch on 2015-12-29.
+
+##### 1) [code-age.png](https://github.com/peterwilliams97/git-stats-examples/blob/master/examples/git.stats/git/reports/2015-12-29.28274d02.master/%5Ball-files%5D/%5Ball-authors%5D/code-age.png) is a graph showing the age of the code in question.
 
 The horizontal axis is date and the vertical axis is LoC /day. This means the area under the curve
 between two dates is the LoC surviving from the period bounded by those datess.
 
-You can see that some of Guido's C code from 1991 survives in the current Python 2.7 revision as
-does code up to 2008.
+You can see that some code from 2006 survives in the current git master branch.
 
-![Age graph](https://github.com/peterwilliams97/git-stats/blob/master/examples/git.stats/cpython/reports/2015-12-22.4120e146.2_7/__c.__cpp.__h/Guido_van_Rossum/code-age.png)
+![Age graph](https://github.com/peterwilliams97/git-stats-examples/blob/master/examples/git.stats/git/reports/2015-12-29.28274d02.master/%5Ball-files%5D/%5Ball-authors%5D/code-age.png)
 
 
-##### 2) [code-age.txt](https://github.com/peterwilliams97/git-stats/blob/master/examples/git.stats/cpython/reports/2015-12-22.4120e146.2_7/__c.__cpp.__h/Guido_van_Rossum/code-age.txt) lists the commits in the peaks in code-age.png
+##### 2) [code-age.txt](https://github.com/peterwilliams97/git-stats-examples/blob/master/examples/git.stats/git/reports/2015-12-29.28274d02.master/%5Ball-files%5D/%5Ball-authors%5D/code-age.txt) lists the commits in the peaks in code-age.png
 
     ================================================================================
-    Guido van Rossum: 10 peaks 12971 LoC
+    [all-authors]: 10 peaks 117654 LoC
     ................................................................................
-      2) 4 commits 941 LoC around 1991-08-10
-      828 LoC, 1991-08-07 f133238 Initial revision
-       31 LoC, 1991-08-08 a110409 Adde get_mouse and find_first/find_last (by robertl)
-       76 LoC, 1991-08-08 f33866a Lots of cosmetic changes. Lots of small bugfixes (lint!). Made bgn_group and end_group form methods instead of top-level functions.
-        6 LoC, 1991-08-08 9bec514 Fixed almost all list errors.
-
-        ...
+      5) 187 commits 12253 LoC around 2007-07-18
+     1025 LoC, 2007-07-21 90a7149 German translation for git-gui
+     1006 LoC, 2007-07-22 e79bbfe Add po/git-gui.pot
+      992 LoC, 2007-07-22 4fe7626 Italian translation of git-gui
+     1095 LoC, 2007-07-25 2340a74 Japanese translation of git-gui
+     1150 LoC, 2007-07-27 f6b7de2 Hungarian translation of git-gui
     ................................................................................
-      1) 21 commits 4133 LoC around 1997-04-08
-      111 LoC, 1997-04-02 783828f Added replace() implementation by Perry Stoll (debugged and reformatted by me).
-     2540 LoC, 1997-04-04 333c03c New version by Sjoerd, with support for IRIX 6 audio library.
-       23 LoC, 1997-04-10 dc02de7 Unknown changes by Jim Fulton.
-     1065 LoC, 1997-04-10 7e5a815 Jim Fulton's version 2.2.
-      295 LoC, 1997-04-12 db0be79 Completely revamped the way the default path is constructed.
-
+     10) 130 commits 9705 LoC around 2009-06-03
+      135 LoC, 2009-05-26 3902985 t5500: Modernize test style
+     7040 LoC, 2009-06-01 f0ed822 Add custom memory allocator to MinGW and MacOS builds
+      124 LoC, 2009-06-04 195643f Add 'git svn reset' to unwind 'git svn fetch'
+      127 LoC, 2009-06-06 2264dfa http*: add helper methods for fetching packs
+      288 LoC, 2009-06-06 5424bc5 http*: add helper methods for fetching objects (loose)
+    ................................................................................
         ...
 
-##### 3) [oldest.txt](https://github.com/peterwilliams97/git-stats/blob/master/examples/git.stats/cpython/reports/2015-12-22.4120e146.2_7/__c.__cpp.__h/Guido_van_Rossum/oldest.txt) lists oldest commits in the code in question.
-
-Guido's oldest C code commit that survives in the 2.7 branch is from October 1990. You can also see
-that 2019 of his C commits survive, probably only partially). These remnants comprise 78,000
-lines of C (i.e. `*.c`, `*.cpp` and `*.h`).
+##### 3) [oldest-commits.txt](https://github.com/peterwilliams97/git-stats-examples/blob/master/examples/git.stats/git/reports/2015-12-29.28274d02.master/%5Ball-files%5D/%5Ball-authors%5D/oldest-commits.txt) lists the oldest commits in the code in question.
 
     ================================================================================
     Guido van Rossum: 2109 commits 78288 LoC
@@ -101,60 +157,22 @@ lines of C (i.e. `*.c`, `*.cpp` and `*.h`).
 
         ...
 
-##### 4) [newest.txt](https://github.com/peterwilliams97/git-stats/blob/master/examples/git.stats/cpython/reports/2015-12-22.4120e146.2_7/__c.__cpp.__h/Guido_van_Rossum/newest.txt) lists newest commits in the code in question.
-
-Guido's last C code commit that survives in the 2.7 branch is from November 2008
+##### 4) [newest-commits.txt](https://github.com/peterwilliams97/git-stats-examples/blob/master/examples/git.stats/git/reports/2015-12-29.28274d02.master/%5Ball-files%5D/%5Ball-authors%5D/newest-commits.txt) lists the oldest commits in the code in question.
 
     ================================================================================
-    Guido van Rossum: 2109 commits 78288 LoC
+    [all-authors]: 23743 commits 764802 LoC
     ................................................................................
-        3 LoC, 2008-09-11 e9f5f91 - Issue #3629: Fix sre "bytecode" validator for an end case.   Reviewed by Amaury.
-        4 LoC,   Lib/test/test_re.py
-        3 LoC,   Modules/_sre.c
-        2 LoC,   Misc/NEWS
+       12 LoC, 2015-12-29 28274d0 Git 2.7-rc3
+       11 LoC,   Documentation/RelNotes/2.7.0.txt
+        1 LoC,   GIT-VERSION-GEN
     ................................................................................
-       16 LoC, 2008-08-20 5512f4f Issue 1179: [CVE-2007-4965] Integer overflow in imageop module.
-       16 LoC,   Modules/imageop.c
+      119 LoC, 2015-12-28 c5e5e68 l10n: Updated Bulgarian translation of git (2477t,0f,0u)
+      119 LoC,   po/bg.po
+    ................................................................................
 
        ...
 
-##### 5) [details.csv](https://github.com/peterwilliams97/git-stats/blob/master/examples/git.stats/cpython/reports/2015-12-22.4120e146.2_7/__c.__cpp.__h/Guido_van_Rossum/details.csv) attempts to show where the code is distributed through the source tree.
+##### 5) [details.csv](https://github.com/peterwilliams97/git-stats-examples/blob/master/examples/git.stats/git/reports/2015-12-29.28274d02.master/%5Ball-files%5D/%5Ball-authors%5D/details.csv) attempts to show where the code is distributed through the source tree.
 
-<table>
-<tr><th>dir</th><th>LoC</th><th>frac</th></tr>
-<tr><td></td><td>78288</td><td>0</td></tr>
-<tr><td>Modules</td><td>33059</td><td>0.422274167178</td></tr>
-<tr><td>Objects</td><td>17963</td><td>0.22944768036</td></tr>
-<tr><td>Python</td><td>13024</td><td>0.166360106274</td></tr>
-<tr><td>Include</td><td>4256</td><td>0.0543633762518</td></tr>
-<tr><td>PC</td><td>3583</td><td>0.045766911915</td></tr>
-<tr><td>Parser</td><td>3248</td><td>0.0414878397711</td></tr>
-</table>
+<table><tr><th>dir</th><th>LoC</th><th>frac</th></tr><tr><th></th><th>764802</th><th>1</th></tr><tr><th>t</th><th>167955</th><th>0.21960585877128982</th></tr><tr><th>po</th><th>120787</th><th>0.15793237988394382</th></tr><tr><th>Documentation</th><th>82641</th><th>0.1080554182651196</th></tr><tr><th>builtin</th><th>55958</th><th>0.07316664966880317</th></tr><tr><th>git-gui</th><th>53934</th><th>0.0705202130747566</th></tr><tr><th>git-gui/po</th><th>37087</th><th>0.6876367412022101</th></tr><tr><th>contrib</th><th>35890</th><th>0.04692717853771303</th></tr><tr><th>gitk-git</th><th>29385</th><th>0.03842170914825013</th></tr><tr><th>compat</th><th>25884</th><th>0.03384405375508955</th></tr><tr><th>Documentation/RelNotes</th><th>19709</th><th>0.2384893696833291</th></tr></table>
 
-* The source tree of Guido's C files contains 78288 LoC
-* Its subdirectory `Modules` contains 33059 LoC
-* etc
-
-
-### Top level files [2015-12-22.4120e146.2_7/__c.__cpp.__h/](https://github.com/peterwilliams97/git-stats/tree/master/examples/git.stats/cpython/reports/2015-12-22.4120e146.2_7/__c.__cpp.__h/)
-
-##### 1) [ext_author_files.csv](https://github.com/peterwilliams97/git-stats/blob/master/examples/git.stats/cpython/reports/2015-12-22.4120e146.2_7/__c.__cpp.__h/ext_author_files.csv) shows numbers of source files by extension and author
-
-<table><tr><th></th><th>Total</th><th>Guido van Rossum</th><th>Martin v. Löwis</th><th>Tim Peters</th><th>Neal Norwitz</th></tr><tr><th>Total</th><th>15092</th><th>3252</th><th>1239</th><th>962</th><th>770</th></tr><tr><th>.c</th><th>12887</th><th>2744</th><th>1013</th><th>829</th><th>708</th></tr><tr><th>.h</th><th>2205</th><th>508</th><th>226</th><th>133</th><th>62</th></tr></table>
-
-This shows the number of files in which each author has one or more lines of code in the revision
-being reported. (This table shown on this page is truncated.)
-
-##### 2) [ext_author_loc.csv](https://github.com/peterwilliams97/git-stats/blob/master/examples/git.stats/cpython/reports/2015-12-22.4120e146.2_7/__c.__cpp.__h/ext_author_loc.csv) shows LoC by extension and author
-
-<table><tr><th></th><th>Total</th><th>Jack Jansen</th><th>Guido van Rossum</th><th>Martin v. Löwis</th><th>Thomas Heller</th></tr><tr><th>Total</th><th>549292</th><th>79897</th><th>78288</th><th>49728</th><th>25848</th></tr><tr><th>.c</th><th>464959</th><th>79578</th><th>70939</th><th>40661</th><th>22891</th></tr><tr><th>.h</th><th>84333</th><th>319</th><th>7349</th><th>9067</th><th>2957</th></tr></table>
-
-This shows the lines of code in the revision being reported. (This table shown on this page is truncated.)
-
-### code-age.py usage
-
-* Copy code-age.py to your computer
-* Open a shell and cd to the root of the git repository you want to report
-* `python code-age.py` NOTE: This can take hours to run a big repository as it blames every file in the repository.
-* The location of the reports directory will be written to stdout
-* Optionally try some patterns e.g. `python code-age.py '*.py'`, `python code-age.py docs`
