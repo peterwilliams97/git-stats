@@ -22,13 +22,15 @@ git-stats currently contains only one analysis script, [code-age.py](https://git
 
 # [code-age.py](https://github.com/peterwilliams97/git-stats/blob/master/code-age.py)
 
-### usage
+### Usage
 
 * Copy code-age.py to your computer
 * Open a shell and cd to the root of the git repository you want to report
 * `python code-age.py` NOTE: This can take hours to run a big repository as it blames every file in the repository.
 * The location of the reports directory will be written to stdout
 * Optionally try some patterns e.g. `python code-age.py '*.py'`, `python code-age.py docs`
+
+### Reports
 
 code-age.py analyzes the age of files in a git repository and writes some reports and draws some graphs about them. It writes reports in the directory structure given in [git.stats.tree.txt](https://github.com/peterwilliams97/git-stats/blob/master/examples/git.stats.tree.txt)
 
