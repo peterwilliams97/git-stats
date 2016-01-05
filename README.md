@@ -66,7 +66,7 @@ e.g. For repository [git](https://github.com/python/cpython.git), which is a git
 
 ### Top level files [2015-12-29.28274d02.master/\[all-files\]](https://github.com/peterwilliams97/git-stats-examples/tree/master/examples/git.stats/git/reports/2015-12-29.28274d02.master/%5Ball-files%5D/)
 
-##### 1) [README](https://github.com/peterwilliams97/git-stats-examples/tree/master/examples/git.stats/git/reports/2015-12-29.28274d02.master/%5Ball-files%5D/READ)
+##### 1) [README](https://github.com/peterwilliams97/git-stats-examples/tree/master/examples/git.stats/git/reports/2015-12-29.28274d02.master/%5Ball-files%5D/README)
 
 This file contains summary information about this report.
 
@@ -103,7 +103,6 @@ This shows the lines of code in the revision being reported by extension and aut
 truncated. author_ext_loc.csv](https://github.com/peterwilliams97/git-stats-examples/tree/master/examples/git.stats/git/reports/2015-12-29.28274d02.master/%5Ball-files%5D/author_ext_loc.csv) has the full table.)
 
 <table><tr><th></th><th>Total</th><th>.c</th><th>.sh</th><th>.po</th><th>.txt</th></tr><tr><th>Total</th><th>764802.0</th><th>198828.0</th><th>172727.0</th><th>159684.0</th><th>81591.0</th></tr><tr><th>Junio C Hamano</th><th>115080.0</th><th>37433</th><th>27753</th><th>6220</th><th>28929</th></tr><tr><th>Jeff King</th><th>31776.0</th><th>13134</th><th>11724</th><th>0</th><th>3175</th></tr><tr><th>Jiang Xin</th><th>24649.0</th><th>1170</th><th>718</th><th>11256</th><th>81</th></tr><tr><th>Shawn O. Pearce</th><th>24636.0</th><th>5392</th><th>4748</th><th>1519</th><th>2353</th></tr><tr><th>Nguyễn Thái Ngọc Duy</th><th>20908.0</th><th>13226</th><th>5499</th><th>0</th><th>1233</th></tr><tr><th>Peter Krefting</th><th>16243.0</th><th>4</th><th>11</th><th>15718</th><th>0</th></tr><tr><th>Alexander Shopov</th><th>16182.0</th><th>0</th><th>0</th><th>16149</th><th>29</th></tr><tr><th>Johannes Schindelin</th><th>15963.0</th><th>7531</th><th>4996</th><th>0</th><th>1345</th></tr><tr><th>Jonathan Nieder</th><th>15266.0</th><th>3111</th><th>6625</th><th>0</th><th>1914</th></tr><tr><th>Ævar Arnfjörð Bjarmason</th><th>14688.0</th><th>11093</th><th>1306</th><th>93</th><th>107</th></tr></table>
-
 
 
 ### A closer look at [2015-12-29.28274d02.master/\[all-files\]/\[all-authors\]](https://github.com/peterwilliams97/git-stats-examples/tree/master/examples/git.stats/git/reports/2015-12-29.28274d02.master/%5Ball-files%5D/%5Ball-authors%5D)
