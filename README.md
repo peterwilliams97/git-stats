@@ -136,18 +136,17 @@ You can see that some code from 2006 survives in the current git master branch.
 ##### 3) [oldest-commits.txt](https://github.com/peterwilliams97/git-stats-examples/blob/master/examples/git.stats/git/reports/2015-12-29.28274d02.master/%5Ball-files%5D/%5Ball-authors%5D/oldest-commits.txt) lists the oldest commits in the code in question.
 
     ================================================================================
-    Guido van Rossum: 2109 commits 78288 LoC
+    [all-authors]: 23743 commits 764802 LoC
     ................................................................................
-     3760 LoC, 1990-10-14 daadddf Initial revision
-      802 LoC,   Modules/cstubs
-      599 LoC,   Parser/pgen.c
-      383 LoC,   Modules/cgen.py
+    111 LoC, 2005-04-08 e83c516 Initial revision of "git", the information manager from hell
+     38 LoC,   cache.h
+     22 LoC,   read-cache.c
+     11 LoC,   README
     ................................................................................
-       16 LoC, 1990-10-15 fddb56c Adde dconvenience functions.
-       16 LoC,   Python/errors.c
-    ................................................................................
-        3 LoC, 1990-10-15 5122aee Made exception objects extern. Added convenience functions.
-        3 LoC,   Include/pyerrors.h
+     40 LoC, 2005-04-08 8bc9a0c Add copyright notices.
+      5 LoC,   builtin/cat-file.c
+      5 LoC,   builtin/commit-tree.c
+      5 LoC,   builtin/diff-files.c
 
         ...
 
