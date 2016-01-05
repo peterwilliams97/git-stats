@@ -93,22 +93,15 @@ code.
 
 <table><tr><th></th><th>Total</th><th>.c</th><th>.sh</th><th>.txt</th><th>.h</th></tr><tr><th>Total</th><th>40742.0</th><th>14352.0</th><th>9457.0</th><th>7276.0</th><th>2710.0</th></tr><tr><th>Junio C Hamano</th><th>7747.0</th><th>2779</th><th>1713</th><th>1973</th><th>504</th></tr><tr><th>Jeff King</th><th>3070.0</th><th>1479</th><th>853</th><th>296</th><th>291</th></tr><tr><th>Nguyễn Thái Ngọc Duy</th><th>1680.0</th><th>994</th><th>226</th><th>174</th><th>210</th></tr><tr><th>Shawn O. Pearce</th><th>1254.0</th><th>384</th><th>352</th><th>99</th><th>55</th></tr><tr><th>Jonathan Nieder</th><th>1159.0</th><th>300</th><th>373</th><th>305</th><th>62</th></tr><tr><th>Linus Torvalds</th><th>1088.0</th><th>770</th><th>78</th><th>16</th><th>136</th></tr><tr><th>Johannes Schindelin</th><th>1022.0</th><th>458</th><th>298</th><th>103</th><th>92</th></tr><tr><th>René Scharfe</th><th>761.0</th><th>514</th><th>104</th><th>60</th><th>73</th></tr><tr><th>Michael Haggerty</th><th>707.0</th><th>437</th><th>106</th><th>56</th><th>70</th></tr><tr><th>Thomas Rast</th><th>696.0</th><th>171</th><th>151</th><th>193</th><th>34</th></tr></table>
 
-This shows the number of files in which each author has one or more lines of code in the revision
-being reported. (This table shown on this page is truncated. [author_ext_files.csv](https://github.com/peterwilliams97/git-stats-examples/tree/master/examples/git.stats/git/reports/2015-12-29.28274d02.master/%5Ball-files%5D/author_ext_files.csv) has the full table.)
-
 ##### 3) [author_ext_loc.csv](https://github.com/peterwilliams97/git-stats-examples/tree/master/examples/git.stats/git/reports/2015-12-29.28274d02.master/%5Ball-files%5D/author_ext_loc.csv)
 
-
-This shows the lines of code in the revision being reported by extension and author. (The table shown on this page is
-truncated. author_ext_loc.csv](https://github.com/peterwilliams97/git-stats-examples/tree/master/examples/git.stats/git/reports/2015-12-29.28274d02.master/%5Ball-files%5D/author_ext_loc.csv) has the full table.)
+This shows the lines of code in the revision being reported by extension and author. (The table shown on this page is truncated. [author_ext_loc.csv](https://github.com/peterwilliams97/git-stats-examples/tree/master/examples/git.stats/git/reports/2015-12-29.28274d02.master/%5Ball-files%5D/author_ext_loc.csv) has the full table.)
 
 <table><tr><th></th><th>Total</th><th>.c</th><th>.sh</th><th>.po</th><th>.txt</th></tr><tr><th>Total</th><th>764802.0</th><th>198828.0</th><th>172727.0</th><th>159684.0</th><th>81591.0</th></tr><tr><th>Junio C Hamano</th><th>115080.0</th><th>37433</th><th>27753</th><th>6220</th><th>28929</th></tr><tr><th>Jeff King</th><th>31776.0</th><th>13134</th><th>11724</th><th>0</th><th>3175</th></tr><tr><th>Jiang Xin</th><th>24649.0</th><th>1170</th><th>718</th><th>11256</th><th>81</th></tr><tr><th>Shawn O. Pearce</th><th>24636.0</th><th>5392</th><th>4748</th><th>1519</th><th>2353</th></tr><tr><th>Nguyễn Thái Ngọc Duy</th><th>20908.0</th><th>13226</th><th>5499</th><th>0</th><th>1233</th></tr><tr><th>Peter Krefting</th><th>16243.0</th><th>4</th><th>11</th><th>15718</th><th>0</th></tr><tr><th>Alexander Shopov</th><th>16182.0</th><th>0</th><th>0</th><th>16149</th><th>29</th></tr><tr><th>Johannes Schindelin</th><th>15963.0</th><th>7531</th><th>4996</th><th>0</th><th>1345</th></tr><tr><th>Jonathan Nieder</th><th>15266.0</th><th>3111</th><th>6625</th><th>0</th><th>1914</th></tr><tr><th>Ævar Arnfjörð Bjarmason</th><th>14688.0</th><th>11093</th><th>1306</th><th>93</th><th>107</th></tr></table>
 
-
 ### A closer look at [2015-12-29.28274d02.master/\[all-files\]/\[all-authors\]](https://github.com/peterwilliams97/git-stats-examples/tree/master/examples/git.stats/git/reports/2015-12-29.28274d02.master/%5Ball-files%5D/%5Ball-authors%5D)
 
-This directory contains files that report on the age of all authors code for all files (i.e. every
-file) in revision `28274d02`, the `git` repository `master` branch on 2015-12-29.
+This directory contains files that report on the age of all authors code for all files (i.e. every file) in revision `28274d02`, the `git` repository `master` branch on 2015-12-29.
 
 ##### 1) [code-age.png](https://github.com/peterwilliams97/git-stats-examples/blob/master/examples/git.stats/git/reports/2015-12-29.28274d02.master/%5Ball-files%5D/%5Ball-authors%5D/code-age.png) is a graph showing the age of the code in question.
 
@@ -118,7 +111,6 @@ between two dates is the LoC surviving from the period bounded by those datess.
 You can see that some code from 2006 survives in the current git master branch.
 
 ![Age graph](https://github.com/peterwilliams97/git-stats-examples/blob/master/examples/git.stats/git/reports/2015-12-29.28274d02.master/%5Ball-files%5D/%5Ball-authors%5D/code-age.png)
-
 
 ##### 2) [code-age.txt](https://github.com/peterwilliams97/git-stats-examples/blob/master/examples/git.stats/git/reports/2015-12-29.28274d02.master/%5Ball-files%5D/%5Ball-authors%5D/code-age.txt) lists the commits in the peaks in code-age.png
 
