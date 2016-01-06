@@ -323,12 +323,15 @@ def exec_output(command, require_output):
     return decode_to_str(output)
 
 
-def exec_output_lines(command, require_output):
+def exec_output_lines(command, require_output, sep=None):
     """Executes `command` which is a list of strings. If `require_output` is True then raise an
         exception is there is no stdout.
         Returns: The stdout of the child process as a list of strings, one string per line.
     """
-    return exec_output(command, require_output).splitlines()
+    if sep is not None:
+        return exec_output(command, require_output).split(sep)
+    else:
+        return exec_output(command, require_output).splitlines()
 
 
 def exec_headline(command):
