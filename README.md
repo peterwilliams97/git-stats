@@ -5,16 +5,17 @@ Compute and display statistics of git repositories
 A scientific Python distribution such as Anaconda.
 
 e.g. Install Anaconda then
-
     conda update conda
     conda update anaconda
+    conda install Pygments
 
 Tested with
 
     python    : 2.7.10 and 3.5.1
-    numpy     : 1.10.1
+    numpy     : 1.10.2
     matplotlib: 1.5.0
     pandas    : 0.17.1
+    pygments  : 2.0.2
 
 You can check your versions with [version.py](https://github.com/peterwilliams97/git-stats/blob/master/version.py).
 

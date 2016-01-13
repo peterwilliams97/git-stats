@@ -16,11 +16,12 @@
       │       │       │   ├── code-age.png    Graph of code age. LoC / day vs date
       │       │       │   ├── code-age.txt    List of commits in the peaks in the code-age.png graph
       │       │       │   ├── details.csv     LoC in each directory in for these files and authors
-      │       │       │   ├── newest-commits.txt      List of newest commits for these files and authors
-      │       │       │   └── oldest-commits.txt      List of oldest commits for these files and authors
+      │       │       │   ├── newest-commits.txt  List of newest commits for these files and authors
+      │       │       │   └── oldest-commits.txt  List of oldest commits for these files and authors
 """
 from __future__ import division, print_function
 import subprocess
+from subprocess import CalledProcessError
 from collections import defaultdict, Counter
 import sys
 import time
@@ -39,6 +40,10 @@ from matplotlib.pylab import cycler
 import bz2
 from multiprocessing import Pool, cpu_count
 from multiprocessing.pool import ThreadPool
+import pygments
+from pygments import lex
+from pygments.token import Text, Comment, Punctuation, Literal
+from pygments.lexers import guess_lexer_for_filename
 
 # Python 2 / 3 stuff
 PY2 = sys.version_info[0] < 3
@@ -57,12 +62,13 @@ except:
 #
 # Configuration.
 #
+CACHE_FILE_VERSION = 1              # Update when making incompatible changes to cache file format
 TIMEZONE = 'Australia/Melbourne'    # The timezone used for all commit times. TODO Make configurable
 SHA_LEN = 8                         # The number of characters used when displaying git SHA-1 hashes
 STRICT_CHECKING = False             # For validating code.
 N_BLAME_PROCESSES = max(1, cpu_count() - 1)  # Number of processes to use for blaming
 N_SHOW_THREADS = 8                 # Number of threads for running the many git show commands
-DO_MULTIPROCESSING = True          # For test non-threaded peformance
+DO_MULTIPROCESSING = True          # For test non-threaded performance
 
 
 # Set graphing style
@@ -84,7 +90,8 @@ IGNORED_EXTS = {
     '.pem', '.pfx', '.png', '.prn', '.so', '.spc', '.svg', '.swf', '.tif', '.tiff', '.xls', '.xlsx',
     '.tar', '.zip', '.gz', '.7z', '.rar',
     '.patch',
-    '.dump'
+    '.dump',
+    '.h5'
    }
 
 
@@ -345,7 +352,17 @@ def git_file_list(path_patterns=()):
     """Returns: List of files in current git revision matching `path_patterns`.
         This is basically git ls-files.
     """
-    return exec_output_lines(['git', 'ls-files', '--exclude-standard'] + path_patterns, False)
+    # git ls-files -z returns a '\0' separated list of files terminated with '\0\0'
+    bin_list = exec_output_lines(['git', 'ls-files', '-z', '--exclude-standard'] + path_patterns,
+                                 False, '\0')
+
+    file_list = []
+    for path in bin_list:
+        if not path:
+            break
+        file_list.append(path)
+
+    return file_list
 
 
 def git_pending_list(path_patterns=()):
@@ -510,17 +527,15 @@ else:
     RE_LINE = re.compile(r'[\n]+')
 
 
-def _extract_author_sha_loc(max_date, text, path):
+def _parse_blame(max_date, text, path):
     """Parses git blame output `text` and extracts LoC for each git hash found
         max_date: Latest valid date for a commit
         text: A string containing the git blame output of file `path`
         path: Path of blamed file. Used only for constructing error messages in this function
-        Returns: sha_date_author, sha_loc
-                 sha_date_author: {sha: (date, author)} over all SHA-1 hashes found in `text`
-                 sha_loc: {sha: loc} over all SHA-1 hashes found in `text`. loc is "lines of code"
+        Returns: line_sha_date_author {line_n: (sha, date, author)} over all lines in the file
+
     """
-    sha_date_author = {}
-    sha_loc = Counter()
+    line_sha_date_author = {}
 
     lines = RE_LINE.split(text)
     while lines and not lines[-1]:
@@ -555,13 +570,46 @@ def _extract_author_sha_loc(max_date, text, path):
         if date > max_date:
             raise GitException('bad date. sha=%s,date=%s' % (sha, date))
 
-        sha_loc[sha] += 1
-        sha_date_author[sha] = (date, author)
+        line_sha_date_author[line_n] = sha, date, author
 
-    if not sha_loc:
+    if not line_sha_date_author:
         raise GitException('is empty')
 
-    return sha_date_author, sha_loc
+    return line_sha_date_author
+
+
+def _compute_author_sha_loc(line_sha_date_author, sloc_lines):
+    """
+        line_sha_date_author: {line_n: (sha, date, author)}
+        sloc_lines: {line_n} for line_n in line_sha_date_author that are source code or None
+        Returns: sha_date_author, sha_aloc, sha_sloc
+                 sha_date_author: {sha: (date, author)} over all SHA-1 hashes in
+                                  `line_sha_date_author`
+                 sha_aloc: {sha: aloc} over all SHA-1 hashes found in `line_sha_date_author`. aloc
+                           is "all lines of code"
+                 sha_sloc: {sha: sloc} over SHA-1 hashes found in `line_sha_date_author` that are in
+                          `sloc_lines`. sloc  is "source lines of code". If sloc_lines is None then
+                          sha_sloc is None.
+    """
+    sha_date_author = {}
+    sha_aloc = Counter()
+    sha_sloc = None
+
+    for sha, date, author in line_sha_date_author.values():
+        sha_aloc[sha] += 1
+        sha_date_author[sha] = (date, author)
+
+    if not sha_aloc:
+        raise GitException('is empty')
+
+    if sloc_lines is not None:
+        sha_sloc = Counter()
+        counted_lines = set(line_sha_date_author.keys()) & sloc_lines
+        for line_n in counted_lines:
+            sha, _, _ = line_sha_date_author[line_n]
+            sha_sloc[sha] += 1
+
+    return sha_date_author, sha_aloc, sha_sloc
 
 
 def get_ignored_files(gitstatsignore):
@@ -605,6 +653,8 @@ class Persistable(object):
         for k, v in new_dict.items():
             if k in base_dict:
                 base_dict[k].update(v)
+            else:
+                base_dict[k] = v
         return base_dict
 
     def _make_path(self, name):
@@ -627,26 +677,40 @@ class Persistable(object):
             assert hasattr(v, 'update'), '%s.TEMPLATE[%s] does not have update(). type=%s' % (
                                           self.__class__.__name__, k, type(v))
 
-    def load(self):
+    def _load_catalog(self):
         catalog = load_object(self._make_path('data.pkl'), {})
-        Persistable.update_dict(self.catalog, catalog)
+        if catalog.get('CACHE_FILE_VERSION', 0) != CACHE_FILE_VERSION:
+            return {}
+
+        del catalog['CACHE_FILE_VERSION']
+        return catalog
+
+    def load(self):
+        catalog = self._load_catalog()
+        print('load: _load_catalog: %s %s' % (bool(catalog), self._make_path('data.pkl')))
+        if not catalog:
+            return False
+        Persistable.update_dict(self.catalog, catalog)  # !@#$ Use toolz
 
         path = self._make_path('summary')
         if os.path.exists(path):
             self.summary = eval(open(path, 'rt').read())
+        return True
 
     def save(self):
         # Load before saving in case another instance of this script is running
         path = self._make_path('data.pkl')
         if os.path.exists(path):
-            catalog = load_object(path, {})
+            catalog = self._load_catalog()
             self.catalog = Persistable.update_dict(catalog, self.catalog)
 
         # Save the data, summary and manifest
         mkdir(self.base_dir)
+        self.catalog['CACHE_FILE_VERSION'] = CACHE_FILE_VERSION
         save_object(path, self.catalog)
         open(self._make_path('summary'), 'wt').write(repr(self.summary))
-        manifest = {k: len(v) for k, v in self.catalog.items()}
+        manifest = {k: len(v) for k, v in self.catalog.items() if k != 'CACHE_FILE_VERSION'}
+        manifest['CACHE_FILE_VERSION'] = CACHE_FILE_VERSION
         open(self._make_path('manifest'), 'wt').write(repr(manifest))
 
     def __repr__(self):
@@ -662,27 +726,127 @@ class BlameRepoState(Persistable):
 
 class BlameRevState(Persistable):
     """Revision level persisted data structures
-        The main structure is path_sha_loc.
+        The main structures are path_sha_aloc and path_sha_sloc.
     """
     TEMPLATE = {
-        'path_sha_loc': lambda: {},
+        'path_sha_aloc': lambda: {},  # aloc for all LoC
+        'path_sha_sloc': lambda: {},  # sloc for source LoC
         'path_set': lambda: set(),
         'bad_path_set': lambda: set(),
     }
 
 
-def _task_extract_author_sha_loc(args):
-    """Wrapper around _extract_author_sha_loc() to allow it to be executed by a multiprocessing
-        Pool.
+def get_lexer(path, text):
+
+    try:
+        return guess_lexer_for_filename(path, text[:1000])
+    except pygments.util.ClassNotFound:
+        return None
+
+
+COMMMENTS = {
+    Comment,
+    Literal.String.Doc,
+    Comment.Multiline,
+    }
+
+
+class LineState(object):
+
+    def __init__(self):
+        self.sloc = set()
+        self.tokens = []
+        self.lnum = 0
+        self.ltype = None
+
+    def tokens_to_lines(self, has_eol):
+        is_comment = self.ltype in COMMMENTS
+        is_blank = self.ltype == Text
+
+        if not (is_comment or is_blank):
+            text = concat(self.tokens)
+            if has_eol:
+                lines = text[:-1].split('\n')
+            else:
+                lines = text.spit('\n')
+
+            for line in lines:
+                self.lnum += 1
+                self.sloc.add(self.lnum)
+
+        self.tokens = []
+        self.ltype = None
+
+
+def get_sloc_lines(path):
+    """Determine the lines in file `path` that are source code. i.e. Not space or comments.
+        This requires a parser for this file type, which exists for most source code files in the
+        Pygment module.
+        Returns: If a Pygment lexer can be found for file `path`
+                    {line_n} i.e. set of 1-offset line number for lines in `path` that are source.
+                Otherwise None
     """
-    max_date, i, path = args
-    sha_date_author, sha_loc, exception = None, None, None
+    with open(path, 'rb') as f:
+        text = decode_to_str(f.read())
+
+    lexer = get_lexer(path, text)
+    if lexer is None:
+        return None
+
+    line_state = LineState()
+
+    for ttype, value in lex(text, lexer):
+
+        if not line_state.ltype:
+            line_state.ltype = ttype
+        elif line_state.ltype == Text:
+            if ttype is not None:
+                line_state.ltype = ttype
+        elif line_state.ltype == Punctuation:
+            if ttype is not None and ttype != Text:
+                line_state.ltype = ttype
+
+        if value:
+            line_state.tokens.append(value)
+        if value.endswith('\n'):
+            line_state.tokens_to_lines(True)
+
+    return line_state.sloc
+
+
+def _task_extract_author_sha_loc(args):
+    """Wrapper around blame and comment detection code to allow it to be executed by a
+        multiprocessing Pool.
+
+        Runs git blame and parses output to extract LoC by sha for all the sha's (SHA-1 hashes) in
+        the blame output.
+        Runs a Pygment lexer over the file if there is a matching lexer and combines this with the
+        blame parse to extract SLoC for each git hash found
+
+        args: max_date, path
+            max_date: Latest valid date for a commit
+            path: path of file to analyze
+
+        Returns: path, sha_date_author, sha_loc, sha_sloc, exception
+            path: from `args`
+`           sha_date_author: {sha: (date, author)} over all SHA-1 hashes found in `path`
+            sha_aloc: {sha: aloc} over all SHA-1 hashes found in `path`. aloc = all lines counts
+            sha_sloc: {sha: sloc} over all SHA-1 hashes found in `path`. sloc = source lines counts
+    """
+    max_date, path = args
+    sha_date_author, sha_aloc, sha_sloc, exception = None, None, None, None
     try:
         text = git_blame_text(path)
-        sha_date_author, sha_loc = _extract_author_sha_loc(max_date, text, path)
+        line_sha_date_author = _parse_blame(max_date, text, path)
+        sloc_lines = get_sloc_lines(path)
+        sha_date_author, sha_aloc, sha_sloc = _compute_author_sha_loc(line_sha_date_author,
+                                                                      sloc_lines)
     except Exception as e:
         exception = e
-    return path, sha_date_author, sha_loc, exception
+        if not DO_MULTIPROCESSING and not isinstance(e, (GitException, CalledProcessError)):
+            print('_task_extract_author_sha_loc: %s: %s' % (type(e), e), file=sys.stderr)
+            raise
+    return path, sha_date_author, sha_aloc, sha_sloc, exception
 
 
 class BlameState(object):
@@ -694,7 +858,8 @@ class BlameState(object):
         Data members: (All are read-only)
             repo_dir
             sha_date_author
-            path_sha_loc
+            path_sha_aloc
+            path_sha_sloc
             path_set
             bad_path_set
 
@@ -731,11 +896,22 @@ class BlameState(object):
         """
         if not STRICT_CHECKING:
             return
-        for path, sha_loc in self.path_sha_loc.items():
-            assert path in self.path_set, '%s not in self.path_set' % path
+        assert 'path_sha_aloc' in self._rev_state.catalog
+        path_sha_loc = self.path_sha_aloc
+        path_set = self.path_set
+        for path, sha_loc in path_sha_loc.items():
+            assert path in path_set, '%s not in self.path_set' % path
             for sha, loc in sha_loc.items():
                 date, author = self.sha_date_author[sha]
-        assert set(self.path_sha_loc.keys()) | self.bad_path_set == self.path_set, 'path sets wrong'
+        assert set(self.path_sha_aloc.keys()) | self.bad_path_set == self.path_set, (
+                   'path sets wrong %d %d\n'
+                   '(path_sha_aloc | bad_path_set) - path_set: %s\n'
+                   'path_set - (path_sha_aloc | bad_path_set): %s\n' % (
+                    len((set(self.path_sha_aloc.keys()) | self.bad_path_set) - self.path_set),
+                    len(self.path_set - (set(self.path_sha_aloc.keys()) | self.bad_path_set)),
+                    sorted((set(self.path_sha_aloc.keys()) | self.bad_path_set) - self.path_set)[:20],
+                    sorted(self.path_set - (set(self.path_sha_aloc.keys()) | self.bad_path_set))[:20]
+                ))
 
     def __init__(self, repo_base_dir, repo_summary, rev_summary):
         """
@@ -771,23 +947,30 @@ class BlameState(object):
 
     def load(self, max_date):
         """Loads a previously saved copy of it data from disk.
-            Returns: A copy of self with its rev_dir member replaced by `rev_dir`
+            Returns: self
         """
-        self._repo_state.load()
-        self._rev_state.load()
+        valid_repo = self._repo_state.load()
+        valid_rev = self._rev_state.load()
+
         if STRICT_CHECKING:
             if max_date is not None:
-                _debug_check_dates(max_date, self.sha_date_author, self.path_sha_loc)
+                _debug_check_dates(max_date, self.sha_date_author, self.path_sha_aloc)
+            assert 'path_sha_aloc' in self._rev_state.catalog,  self._rev_state.catalog.keys()
+            assert 'path_sha_sloc' in self._rev_state.catalog,  self._rev_state.catalog.keys()
             self._debug_check()
-        return self
+
+        return self, valid_repo and valid_rev
 
     def save(self):
         """Saves a copy of its data to disk
         """
-        self._debug_check()
         self._repo_state.save()
         self._rev_state.save()
+
         if STRICT_CHECKING:
+            self._debug_check()
+            assert 'path_sha_aloc' in self._rev_state.catalog,  self._rev_state.catalog.keys()
+            assert 'path_sha_sloc' in self._rev_state.catalog,  self._rev_state.catalog.keys()
             self.load(None)
 
     def __repr__(self):
@@ -809,7 +992,7 @@ class BlameState(object):
         return self._repo_state.catalog['sha_date_author']
 
     @property
-    def path_sha_loc(self):
+    def path_sha_aloc(self):
         """Returns: {path: [(sha, loc)]} for all files that have been found in blaming this
             revision of this repository.
             path_sha_loc[path] is a list of (sha, loc) where sha = SHA-1 hash of commit and
@@ -817,7 +1000,18 @@ class BlameState(object):
 
            This is a per-revision dict.
         """
-        return self._rev_state.catalog['path_sha_loc']
+        return self._rev_state.catalog['path_sha_aloc']
+
+    @property
+    def path_sha_sloc(self):
+        """Returns: {path: [(sha, loc)]} for all files that have been found in blaming this
+            revision of this repository.
+            path_sha_sloc[path] is a list of (sha, loc) where sha = SHA-1 hash of commit and
+            loc = lines of code from that commit in file `path`
+
+           This is a per-revision dict.
+        """
+        return self._rev_state.catalog['path_sha_sloc']
 
     @property
     def path_set(self):
@@ -830,7 +1024,7 @@ class BlameState(object):
     def bad_path_set(self):
         """Returns: set of paths of files that have been unsuccessfully attempted to blame in this
             revision.
-            bad_path_set ∪ path_sha_loc.keys() == path_set
+            bad_path_set ∪ path_sha_aloc.keys() == path_set
            This is a per-revision dict.
         """
         return self._rev_state.catalog['bad_path_set']
@@ -844,8 +1038,9 @@ class BlameState(object):
                      os.path.exists(path_join(rev_dir, 'data.pkl')))
 
         for rev_dir in peer_dirs:
-            rev = self.copy(rev_dir).load(None)
-            yield rev_dir, rev
+            rev, valid = self.copy(rev_dir).load(None)
+            if valid:
+                yield rev_dir, rev
 
     def _update_from_existing(self, file_set):
         """Updates state of this repository / revision with data saved from blaming earlier
@@ -871,7 +1066,6 @@ class BlameState(object):
 
         peer_revisions.sort(key=lambda dir_rev: dir_rev[1]._rev_state.summary['date'])
 
-
         for i, (that_dir, that_rev) in enumerate(peer_revisions):
 
             if not remaining_path_set:
@@ -880,7 +1074,7 @@ class BlameState(object):
             print('%2d: %s,' % (i, that_dir), end=' ')
 
             that_date = that_rev._rev_state.summary['date']
-            sign = '>' if that_date > this_date else '<'
+            sign = '> ' if that_date > this_date else '<='
             print('%s %s %s' % (date_str(that_date), sign, date_str(this_date)), end=' ')
 
             # This is important. git diff can report 2 versions of a file as being identical while
@@ -893,26 +1087,34 @@ class BlameState(object):
             that_sha = that_rev._rev_state.summary['revision_sha']
             that_path_set = that_rev.path_set
             that_bad_path_set = that_rev.bad_path_set
-            diff_set = set(git_diff(this_sha, that_sha))
+            try:
+                diff_set = set(git_diff(this_sha, that_sha))
+            except subprocess.CalledProcessError:
+                print('git_diff(%s, %s) failed. Has someone deleted an old revision %s?' % (
+                      this_sha, that_sha, that_sha), file=sys.stderr)
+                continue
 
             self.bad_path_set.update(that_bad_path_set - diff_set)
             # existing_path_set: files in remaining_path_set that we already have data for
             existing_path_set = remaining_path_set & (that_path_set - diff_set)
 
             for path in existing_path_set:
-                if path in that_rev.path_sha_loc:
-                    self.path_sha_loc[path] = that_rev.path_sha_loc[path]
+                if path in that_rev.path_sha_aloc:
+                    self.path_sha_aloc[path] = that_rev.path_sha_aloc[path]
                     if STRICT_CHECKING:
-                        for sha in self.path_sha_loc[path].keys():
+                        for sha in self.path_sha_aloc[path].keys():
                             assert sha in self.sha_date_author, '\n%s\nthis=%s\nthat=%s\n%s' % (
                                    (sha, path),
                                    self._rev_state.summary, that_rev._rev_state.summary,
-                                   self.path_sha_loc[path])
+                                   sha_loc)
+                if path in that_rev.path_sha_sloc:
+                    self.path_sha_sloc[path] = that_rev.path_sha_sloc[path]
 
                 self.path_set.add(path)
                 remaining_path_set.remove(path)
             print('%d files of %d remaining, diff=%d, used=%d' % (
                    len(remaining_path_set), len(file_set), len(diff_set), len(existing_path_set)))
+        print()
 
 
     def _update_new_files(self, file_set, force):
@@ -933,7 +1135,7 @@ class BlameState(object):
         print('-' * 80)
         print('Update data by blaming %d files' % len(file_set))
 
-        loc0 = sum(sum(sha_loc.values()) for sha_loc in self.path_sha_loc.values())
+        loc0 = sum(sum(sha_loc.values()) for sha_loc in self.path_sha_aloc.values())
         commits0 = len(sha_date_author)
         start = time.time()
         blamed = 0
@@ -948,12 +1150,12 @@ class BlameState(object):
 
         # for i, path in enumerate(file_set):
         max_date = rev_summary['date']
-        filenames = [(max_date, i, path) for i, path in enumerate(file_set)]
-        filenames.sort(key=lambda dip: -os.path.getsize(dip[2]))
+        args_list = [(max_date, path) for path in file_set]
+        args_list.sort(key=lambda dip: -os.path.getsize(dip[1]))
 
         with ProcessPool(ProcessPool.PROCESS, N_BLAME_PROCESSES) as pool:
-            for i, (path, h_d_a, sha_loc, e) in enumerate(
-                pool.imap_unordered(_task_extract_author_sha_loc, filenames)):
+            for i, (path, h_d_a, sha_loc, sha_sloc, e) in enumerate(
+                pool.imap_unordered(_task_extract_author_sha_loc, args_list)):
 
                 if e is not None:
 
@@ -980,19 +1182,19 @@ class BlameState(object):
                     raise
 
                 self.sha_date_author.update(h_d_a)
-                self.path_sha_loc[path] = sha_loc
+                self.path_sha_aloc[path] = sha_loc
+                if sha_sloc:
+                    self.path_sha_sloc[path] = sha_sloc
 
                 if i - last_i >= 100:
                     duration = time.time() - start
 
-                    loc = sum(sum(sha_loc.values()) for sha_loc in self.path_sha_loc.values())
+                    loc = sum(sum(sha_loc.values()) for sha_loc in self.path_sha_aloc.values())
                     if loc != last_loc:
                         print('%d of %d files (%.1f%%), %d bad, %d LoC, %d commits, %.1f secs, %s' %
-                              (i, n_files, 100 * i / n_files, i - blamed,
-                              loc - loc0,
-                              len(sha_date_author) - commits0,
-                              duration,
-                              procrustes(path, width=65)))
+                              (i, n_files, 100 * i / n_files, i - blamed, loc - loc0,
+                               len(sha_date_author) - commits0,  duration,
+                               procrustes(path, width=65)))
                         sys.stdout.flush()
                         last_loc = loc
                         last_i = i
@@ -1000,22 +1202,23 @@ class BlameState(object):
                 blamed += 1
 
                 if STRICT_CHECKING:
-                    _debug_check_dates(max_date, sha_date_author, self.path_sha_loc)
-                    assert path in self.path_sha_loc, os.path.abspath(path)
-                    assert self.path_sha_loc[path], os.path.abspath(path)
-                    assert sum(self.path_sha_loc[path].values()), os.path.abspath(path)
+                    _debug_check_dates(max_date, sha_date_author, self.path_sha_aloc)
+                    assert path in self.path_sha_aloc, os.path.abspath(path)
+                    assert self.path_sha_aloc[path], os.path.abspath(path)
+                    assert sum(self.path_sha_aloc[path].values()), os.path.abspath(path)
 
         if STRICT_CHECKING:
             for path in file_set - self.bad_path_set:
                 if os.path.basename(path) in {'.gitignore'}:
                     continue
-                assert path in self.path_sha_loc, path
+                assert path in self.path_sha_aloc, os.path.abspath(path)
 
         print('~' * 80)
         duration = time.time() - start
-        loc = sum(sum(sha_loc.values()) for sha_loc in self.path_sha_loc.values())
-        print('%d files,%d blamed,%d lines,%d commits,%.1f seconds' % (len(file_set), blamed,
-              loc, len(sha_date_author), duration))
+        aloc = sum(sum(sha_loc.values()) for sha_loc in self.path_sha_aloc.values())
+        sloc = sum(sum(sha_loc.values()) for sha_loc in self.path_sha_sloc.values())
+        print('%d files,%d blamed,%d lines, %d source lines,%d commits,%.1f seconds' % (
+              len(file_set), blamed, aloc, sloc, len(sha_date_author), duration))
 
     def update_data(self, file_set, force):
         """Updates blame state  for this revision for this repository over files in 'file_set'
@@ -1024,7 +1227,7 @@ class BlameState(object):
 
             Updates:
                 repository: sha_date_author
-                revision: path_sha_loc, file_set, bad_path_set
+                revision: path_sha_aloc, path_sha_sloc, file_set, bad_path_set
         """
         assert isinstance(file_set, set), type(file_set)
         n_paths0 = len(self.path_set)
@@ -1041,7 +1244,7 @@ class BlameState(object):
 
         if STRICT_CHECKING:
             for path in set(file_set) - self.bad_path_set:
-                assert path in self.path_sha_loc, path
+                assert path in self.path_sha_aloc, path
 
         return len(self.path_set) > n_paths0
 
@@ -1103,6 +1306,8 @@ def _task_show_oneline(sha):
         text = git_show_oneline(sha)
     except Exception as e:
         exception = e
+        if not DO_MULTIPROCESSING:
+            raise
     return sha, text, exception
 
 
@@ -1863,7 +2068,7 @@ class AuthorReport(object):
             newest_path = path_join(self.report_dir, 'newest-commits.txt')
             oldest_path = path_join(self.report_dir, 'oldest-commits.txt')
 
-            sha_path_loc = make_sha_path_loc(blame_state.path_sha_loc)
+            sha_path_loc = make_sha_path_loc(self.path_sha_loc)
             self.write_legend(legend_path, histo_peaks, n_top_commits)
             self.write_newest(newest_path, sha_path_loc, n_newest_oldest, n_files)
             self.write_oldest(oldest_path, sha_path_loc, n_newest_oldest, n_files)
@@ -1940,7 +2145,7 @@ def filter_bad_files(blame_state, file_set):
 
 
 def create_files_reports(gitstatsignore, path_patterns, do_save, do_show, force, author_pattern,
-    n_top_authors, n_peaks, n_top_commits, n_newest_oldest, n_files, n_min_days):
+    n_top_authors, n_peaks, n_top_commits, n_newest_oldest, n_files, n_min_days, do_sloc):
     """Creates a set of reports for a specified pattern of files in the current revision of the git
         repository this script is being run from.
 
@@ -1995,8 +2200,12 @@ def create_files_reports(gitstatsignore, path_patterns, do_save, do_show, force,
     root_dir = path_join(os.path.expanduser('~'), 'git.stats')
     repo_base_dir = path_join(root_dir, remote_name)
     repo_dir = path_join(repo_base_dir, 'reports')
+    if do_sloc:
+        repo_dir += '.sloc'
     rev_dir = path_join(repo_dir, '.'.join([date_str(revision_date), truncate_sha(revision_sha),
                                             clean_path(description)]))
+    print('rev_dir: %s' % rev_dir)
+    sys.stdout.flush()
     path_patterns = [normalize_path(path) for path in path_patterns]
 
     ppatterns = None if (len(path_patterns) == 1 and path_patterns[0] == '.') else path_patterns
@@ -2036,9 +2245,10 @@ def create_files_reports(gitstatsignore, path_patterns, do_save, do_show, force,
         blame_state.save()
 
     if STRICT_CHECKING:
-        for path in blame_state.path_sha_loc:
-            assert blame_state.path_sha_loc[path], os.path.abspath(path)
-            assert sum(blame_state.path_sha_loc[path].values()), os.path.abspath(path)
+        for path_sha_loc in blame_state.path_sha_aloc, blame_state.path_sha_sloc:
+            for path in path_sha_loc:
+                assert path_sha_loc[path], os.path.abspath(path)
+                assert sum(path_sha_loc[path].values()), os.path.abspath(path)
 
     file_set = filter_bad_files(blame_state, file_set)
     if not file_set:
@@ -2049,7 +2259,8 @@ def create_files_reports(gitstatsignore, path_patterns, do_save, do_show, force,
     all_author_set = _filter_strings(all_authors, author_pattern)
 
     # path_sha_loc is for files matched by file_set and author_set
-    path_sha_loc = filter_path_sha_loc(blame_state, blame_state.path_sha_loc,
+    path_sha_loc = blame_state.path_sha_sloc if do_sloc else blame_state.path_sha_aloc
+    path_sha_loc = filter_path_sha_loc(blame_state, path_sha_loc,
                                        file_set=file_set, author_set=all_author_set)
 
     save_summary_tables(blame_state, path_sha_loc, files_report_dir)
@@ -2073,7 +2284,6 @@ def create_files_reports(gitstatsignore, path_patterns, do_save, do_show, force,
         author_report_list.append(os.path.abspath(author_report.report_dir))
         sys.stdout.flush()
 
-
     print('+' * 80)
     print('%2d reports directories' % len(author_report_list))
     for i, author_dir in enumerate(author_report_list):
@@ -2091,6 +2301,8 @@ def main():
     parser.add_option('-c', '--code-only', action='store_true', default=False, dest='code_only',
                       help='Show only code files')
     parser.add_option('-f', '--force', action='store_true', default=False, dest='force',
+                      help='Force running git blame over source code')
+    parser.add_option('-o', '--do-sloc', action='store_true', default=False, dest='do_sloc',
                       help='Force running git blame over source code')
     parser.add_option('-s', '--show', action='store_true', default=False, dest='do_show',
                       help='Pop up graphs as we go')
@@ -2122,7 +2334,8 @@ def main():
                          options.author_pattern,
                          options.n_top_authors, options.n_peaks,
                          options.n_top_commits, options.n_newest_oldest, options.n_files,
-                         options.n_min_days)
+                         options.n_min_days,
+                         options.do_sloc)
 
 if __name__ == '__main__':
     print('N_BLAME_PROCESSES=%d' % N_BLAME_PROCESSES)
