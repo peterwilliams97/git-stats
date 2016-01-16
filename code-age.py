@@ -687,7 +687,6 @@ class Persistable(object):
 
     def load(self):
         catalog = self._load_catalog()
-        print('load: _load_catalog: %s %s' % (bool(catalog), self._make_path('data.pkl')))
         if not catalog:
             return False
         Persistable.update_dict(self.catalog, catalog)  # !@#$ Use toolz
@@ -844,7 +843,8 @@ def _task_extract_author_sha_loc(args):
                                                                       sloc_lines)
     except Exception as e:
         exception = e
-        if not DO_MULTIPROCESSING and not isinstance(e, (GitException, CalledProcessError)):
+        if not DO_MULTIPROCESSING and not isinstance(e, (GitException, CalledProcessError,
+                                                         IsADirectoryError)):
             print('_task_extract_author_sha_loc: %s: %s' % (type(e), e), file=sys.stderr)
             raise
     return path, sha_date_author, sha_aloc, sha_sloc, exception
@@ -1188,7 +1188,7 @@ class BlameState(object):
                         else:
                             print('   %s cannot be blamed' % apath, file=sys.stderr)
                         continue
-                    elif isinstance(e, subprocess.CalledProcessError):
+                    elif isinstance(e, (subprocess.CalledProcessError, IsADirectoryError)):
                         if not os.path.exists(path):
                             print('    %s no longer exists' % apath, file=sys.stderr)
                             continue
