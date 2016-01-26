@@ -1,0 +1,15 @@
+providers/print/lib/
+
+server/src/web/js/chart
+server/src/web/js/codemirror
+server/src/web/js/dropzone
+server/src/web/js/excanvas.min.js
+server/src/web/js/handlebars
+server/src/web/js/iscroll
+server/src/web/js/jquery
+server/src/web/js/json-js
+server/src/web/js/lib
+server/src/web/js/
+server/src/web/js/
+server/src/web/js/
+

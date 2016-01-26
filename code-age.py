@@ -62,7 +62,7 @@ except:
 #
 # Configuration.
 #
-CACHE_FILE_VERSION = 1              # Update when making incompatible changes to cache file format
+CACHE_FILE_VERSION = 3              # Update when making incompatible changes to cache file format
 TIMEZONE = 'Australia/Melbourne'    # The timezone used for all commit times. TODO Make configurable
 SHA_LEN = 8                         # The number of characters used when displaying git SHA-1 hashes
 STRICT_CHECKING = False             # For validating code.
@@ -76,11 +76,7 @@ matplotlib.style.use('ggplot')
 plt.rcParams['axes.prop_cycle'] = cycler('color', ['b', 'y', 'k', '#707040', '#404070'])
 plt.rcParams['savefig.dpi'] = 300
 
-# Max length for file path names
-try:
-    PATH_MAX = os.pathconf(__file__, 'PC_NAME_MAX')
-except:
-    PATH_MAX = 255
+PATH_MAX = 255
 
 # Files that we don't analyze. These are files that don't have lines of code so that blaming
 #  doesn't make sense.
@@ -412,7 +408,13 @@ def git_remote():
     # origin  https://github.com/FFTW/fftw3.git (fetch)
     # origin  https://github.com/FFTW/fftw3.git (push)
 
-    for line in exec_output_lines(['git', 'remote', '-v'], True):
+    try:
+        output_lines = exec_output_lines(['git', 'remote', '-v'], True)
+    except Exception as e:
+        print('git_remote error: %s' % e)
+        return 'unknown', 'unknown'
+
+    for line in output_lines:
         m = RE_REMOTE_URL.search(line)
         if not m:
             continue
@@ -482,6 +484,8 @@ def clean_path(path):
 def git_blame_text(path):
     """Returns: git blame text for file `path`
     """
+    if PY2:
+        path = path.encode(sys.getfilesystemencoding())
     return exec_output(['git', 'blame', '-l', '-f', '-w', '-M', path], False)
 
 
@@ -973,9 +977,6 @@ class BlameState(object):
         self._rev_state.save()
 
         if STRICT_CHECKING:
-            self._debug_check()
-            assert 'path_sha_aloc' in self._rev_state.catalog,  self._rev_state.catalog.keys()
-            assert 'path_sha_sloc' in self._rev_state.catalog,  self._rev_state.catalog.keys()
             self.load(None)
 
     def __repr__(self):
@@ -1119,10 +1120,9 @@ class BlameState(object):
                     self.path_sha_aloc[path] = that_rev.path_sha_aloc[path]
                     if STRICT_CHECKING:
                         for sha in self.path_sha_aloc[path].keys():
-                            assert sha in self.sha_date_author, '\n%s\nthis=%s\nthat=%s\n%s' % (
+                            assert sha in self.sha_date_author, '\n%s\nthis=%s\nthat=%s' % (
                                    (sha, path),
-                                   self._rev_state.summary, that_rev._rev_state.summary,
-                                   sha_loc)
+                                   self._rev_state.summary, that_rev._rev_state.summary)
                 if path in that_rev.path_sha_sloc:
                     self.path_sha_sloc[path] = that_rev.path_sha_sloc[path]
 
@@ -1132,11 +1132,10 @@ class BlameState(object):
                    len(remaining_path_set), len(file_set), len(diff_set), len(existing_path_set)))
         print()
 
-        # Some files that were "bad" in other revision (e.g. empty) may not be bad in this revision
-        # We fix that here based on the knowledge that self.path_sha_aloc contains only good files
         bad_path_set = self.bad_path_set
-        path_set = self.path_set
         bad_path_set -= set(self.path_sha_aloc.keys())
+
+        path_set = self.path_set
         path_set |= set(self.path_sha_aloc.keys()) | bad_path_set
         self._debug_check()
 
@@ -1162,7 +1161,6 @@ class BlameState(object):
         last_loc = loc0
         last_i = 0
 
-        # FIXME: Filter .gitignore ealier than this
         for path in file_set:
             self.path_set.add(path)
             if os.path.basename(path) in {'.gitignore'}:
@@ -1309,7 +1307,7 @@ def filter_path_sha_loc(blame_state, path_sha_loc, file_set=None, author_set=Non
                    if author in author_set}
         path_sha_loc = {path: {sha: loc for sha, loc in sha_loc.items()
                                if sha in sha_set}
-                         for path, sha_loc in path_sha_loc.items()}
+                        for path, sha_loc in path_sha_loc.items()}
         path_sha_loc = {path: sha_loc
                         for path, sha_loc in path_sha_loc.items() if sha_loc}
 
@@ -1354,8 +1352,9 @@ def parallel_show_oneline(sha_iter):
 
 
 def make_sha_path_loc(path_sha_loc):
-    """path_sha_loc: {path: {sha: loc}}
-       Returns: {sha: {path: loc}}
+    """Make a re-organized version of `path_sha_loc`
+        path_sha_loc: {path: {sha: loc}}
+        Returns: {sha: {path: loc}}
     """
     sha_path_loc = defaultdict(dict)
     for path, sha_loc in path_sha_loc.items():
@@ -1600,6 +1599,7 @@ def get_top_authors(blame_state, path_sha_loc):
                 author_loc_dates: {author: loc, min date, max date} over all author's commits
                 top_authors: Authors in `author_report` in descending order of LoC
     """
+    assert path_sha_loc
     sha_date_author = blame_state.sha_date_author
 
     author_loc_dates = defaultdict(lambda: [0, DATE_INF_POS, DATE_INF_NEG])
@@ -1906,8 +1906,7 @@ def plot_analysis(blame_state, author_report, histo_peaks, do_show, graph_path):
 
 
 def aggregate_author_date_sha_loc(author_date_sha_loc, author_set=None):
-    """Get commit list [(date, sha, loc)] by author.
-        author_date_sha_loc: {author: [(date, sha, loc)]} a dict of lists of (date, sha, loc) for
+    """ author_date_sha_loc: {author: [(date, sha, loc)]} a dict of lists of (date, sha, loc) for
                                all commits by each author
         author_set: Authors to aggregate over.
         Returns: [(date, sha, loc)] for all authors in `author_set`
@@ -1920,11 +1919,9 @@ def aggregate_author_date_sha_loc(author_date_sha_loc, author_set=None):
     return date_sha_loc
 
 
-def put_newest_oldest(f, author, sha_path_loc, date_sha_loc, sha_date_author, n_commits,
+def put_newest_oldest_commits(f, author, sha_path_loc, date_sha_loc, sha_date_author, n_commits,
     n_files, is_newest):
-    """Write a report of oldest surviving commits in current revision
-        n_commits: Max number of commits to write
-        n_files: Max number of files to write for each revision
+    """Write a report of oldest or newest surviving commits in current revision
 
         author: Date of oldest revision
         commit 1: Same format as write_legend
@@ -1933,6 +1930,14 @@ def put_newest_oldest(f, author, sha_path_loc, date_sha_loc, sha_date_author, n_
             ...
         commit 2: ...
             ...
+
+        f: file handle to write to
+        sha_path_loc: {sha: {path: loc}}
+        date_sha_loc: [(date, sha, loc)] over all files in this report
+        sha_date_author: {sha: (date, author)} for all commits in this repository.
+        n_commits: Max number of commits to write
+        n_files: Max number of files to write for each revision
+        is_newest: Write newest commits if True, otherwise oldest commits
     """
 
     def put(s):
@@ -1961,6 +1966,38 @@ def put_newest_oldest(f, author, sha_path_loc, date_sha_loc, sha_date_author, n_
         for j, (path, l) in enumerate(path_loc[:n_files]):
             put('%5d LoC,   %s' % (l, path))
         cnt += 1
+
+
+def put_newest_oldest_files(f, author, path_earliest_latest, n_files, is_newest):
+    """Write a report of files that were least recently changed by `author` (`is_newest` is False),
+        or was first most least recently changed by `author` in current revision.
+
+        f: file handle to write to
+        path_earliest_latest: {path: (earliest, latest)}
+        n_files: Max number of files to write
+        is_newest: Write newest commits if True, otherwise oldest commits
+    """
+
+    def put(s):
+        f.write('%s\n' % s)
+
+    if is_newest:
+        def date_key(path):
+            return path_earliest_latest[path][0]
+    else:
+        def date_key(path):
+            return path_earliest_latest[path][1]
+
+    paths_by_date = sorted(path_earliest_latest.keys(), key=date_key)
+    if is_newest:
+        paths_by_date.reverse()
+
+    put('=' * 80)
+    put('%s: %d files' % (author, len(path_earliest_latest)))
+
+    for i, path in enumerate(paths_by_date[:n_files]):
+        earliest, latest = path_earliest_latest[path]
+        put('%3d: %s %s %s' % (i, date_str(earliest), date_str(latest), path))
 
 
 class AuthorReport(object):
@@ -2027,17 +2064,25 @@ class AuthorReport(object):
                     put('%5d LoC, %s %s' % (self.sha_loc[sha],
                         date_str(self.blame_state.sha_date_author[sha][0]), sha_text[sha]))
 
-    def write_newest(self, newest_path, sha_path_loc, n_commits, n_files):
+    def write_newest_commits(self, newest_path, sha_path_loc, n_commits, n_files):
         with open(newest_path, 'wt') as f:
-            put_newest_oldest(f, self.report_name, sha_path_loc, self.date_sha_loc,
-                              self.blame_state.sha_date_author, n_commits, n_files, True)
+            put_newest_oldest_commits(f, self.report_name, sha_path_loc, self.date_sha_loc,
+                                      self.blame_state.sha_date_author, n_commits, n_files, True)
 
-    def write_oldest(self, oldest_path, sha_path_loc, n_commits, n_files):
+    def write_oldest_commits(self, oldest_path, sha_path_loc, n_commits, n_files):
         with open(oldest_path, 'wt') as f:
-            put_newest_oldest(f, self.report_name, sha_path_loc, self.date_sha_loc,
-                              self.blame_state.sha_date_author, n_commits, n_files, False)
+            put_newest_oldest_commits(f, self.report_name, sha_path_loc, self.date_sha_loc,
+                                      self.blame_state.sha_date_author, n_commits, n_files, False)
 
-    def analyze_blame(self):
+    def write_newest_files(self, newest_path, n_files):
+        with open(newest_path, 'wt') as f:
+            put_newest_oldest_files(f, self.report_name, self.path_earliest_latest, n_files, True)
+
+    def write_oldest_files(self, oldest_path, n_files):
+        with open(oldest_path, 'wt') as f:
+            put_newest_oldest_files(f, self.report_name, self.path_earliest_latest, n_files, False)
+
+    def compute_derived_variables(self):
         """Compute derived member variables
             self.sha_loc               {sha: loc} over all commit hashes in self.path_sha_loc
             self.author_date_sha_loc   {author: [(date, sha, loc)]} for all author's commits
@@ -2058,8 +2103,17 @@ class AuthorReport(object):
         for author in author_date_sha_loc.keys():
             author_date_sha_loc[author].sort()
 
+        # First and last commit dates on each file
+        path_earliest_latest = defaultdict(lambda: [DATE_INF_POS, DATE_INF_NEG])
+        for path, h_l in path_sha_loc.items():
+            for sha, loc in h_l.items():
+                date, _ = sha_date_author[sha]
+                earliest, latest = path_earliest_latest[path]
+                path_earliest_latest[path] = [min(earliest, date), max(latest, date)]
+
         self.sha_loc = sha_loc
         self.author_date_sha_loc = author_date_sha_loc
+        self.path_earliest_latest = path_earliest_latest
 
     def save_code_age(self, do_save, do_show, n_peaks, n_top_commits, n_newest_oldest, n_files,
         n_min_days):
@@ -2088,18 +2142,24 @@ class AuthorReport(object):
         if do_save:
             graph_path = path_join(self.report_dir, 'code-age.png')
             legend_path = path_join(self.report_dir, 'code-age.txt')
-            newest_path = path_join(self.report_dir, 'newest-commits.txt')
-            oldest_path = path_join(self.report_dir, 'oldest-commits.txt')
+            newest_commits_path = path_join(self.report_dir, 'newest-commits.txt')
+            oldest_commits_path = path_join(self.report_dir, 'oldest-commits.txt')
+            newest_files_path = path_join(self.report_dir, 'newest-files.txt')
+            oldest_files_path = path_join(self.report_dir, 'oldest-files.txt')
 
             sha_path_loc = make_sha_path_loc(self.path_sha_loc)
             self.write_legend(legend_path, histo_peaks, n_top_commits)
-            self.write_newest(newest_path, sha_path_loc, n_newest_oldest, n_files)
-            self.write_oldest(oldest_path, sha_path_loc, n_newest_oldest, n_files)
+            self.write_newest_commits(newest_commits_path, sha_path_loc, n_newest_oldest, n_files)
+            self.write_oldest_commits(oldest_commits_path, sha_path_loc, n_newest_oldest, n_files)
+            self.write_newest_files(newest_files_path, n_newest_oldest)
+            self.write_oldest_files(oldest_files_path, n_newest_oldest)
 
             self.name_description['code-age.png'] = 'Graph of code age'
             self.name_description['code-age.txt'] = 'Commits around peaks in code-age.png'
             self.name_description['newest-commits.txt'] = 'Newest commits'
             self.name_description['oldest-commits.txt'] = 'Oldest surviving commits'
+            self.name_description['newest-files.txt'] = 'Newest commits'
+            self.name_description['oldest-files.txt'] = 'Oldest surviving commits'
 
         else:
             graph_path = None
@@ -2297,7 +2357,7 @@ def create_files_reports(gitstatsignore, path_patterns, do_save, do_show, force,
         author_set = None if author is None else {author}
         author_report = AuthorReport(blame_state, path_sha_loc, revision_date, files_report_name,
                                      files_report_dir, author_set)
-        author_report.analyze_blame()
+        author_report.compute_derived_variables()
         saved = author_report.save_code_age(do_save, do_show, n_peaks, n_top_commits,
                                             n_newest_oldest, n_files, n_min_days)
         if not saved:
