@@ -9,6 +9,7 @@ import sys
 import time
 import re
 import os
+from collections import namedtuple
 
 
 # Python 2 / 3 stuff
@@ -26,6 +27,9 @@ except:
 TIMEZONE = 'Australia/Melbourne'    # The timezone used for all commit times. TODO Make configurable
 SHA_LEN = 8                         # The number of characters used when displaying git SHA-1 hashes
 STRICT_CHECKING = True              # For validating code.
+
+
+ExecResult = namedtuple('ExecResult', ['command', 'ret', 'out', 'err'])
 
 
 def _is_windows():
@@ -58,10 +62,6 @@ else:
         os.nice(1)
 
 
-def get_time():
-    return time.time()
-
-
 def truncate_sha(sha):
     """The way we show git SHA-1 hashes in reports."""
     return sha[:SHA_LEN]
@@ -83,7 +83,13 @@ def decode_to_str(bytes):
 
 
 def run_program(command, async_timeout=60.0):
+    # r = subprocess.run(command)
+    # print('$' * 80)
+    # print(r)
+    # for a in r.args:
+    #     print(a)
     ps = subprocess.Popen(command,
+                          # shell=True
                           stdout=subprocess.PIPE,
                           stderr=subprocess.PIPE)
 
@@ -96,14 +102,44 @@ def run_program(command, async_timeout=60.0):
             break
         time.sleep(1.0)
 
+
     return ret, out, err
 
 
-def format_error(name, ret, out, err):
-    assert isinstance(ret, int), ret
+def border(name):
+    return '%s: %s' % (name, (78 - len(name)) * '^')
+
+BORDER = '^' * 80
+BORDER_FAILURE = '*' * 80
+
+
+def format_error(exec_result, name=None, failure=None):
+    command, ret, out, err = exec_result
+
+    assert name is None or isinstance(name, str), (name, type(name))
+    assert isinstance(ret, int), (ret, type(ret))
+
+    if name is None:
+        name = ' '.join(command)
+
     summary = '%s: ret=%d,out=%d,err=%d' % (name, ret, len(out), len(err))
-    msg = '\n'.join([border('out'), out, border('err'), err, BORDER, summary])
-    return '\n%s\n' % msg
+    parts = [border('out'), out, border('err'), err]
+    if failure:
+        parts.extend([BORDER_FAILURE, failure])
+    parts.extend([BORDER, summary])
+
+    return '\n%s\n' % '\n'.join(parts)
+
+
+_git_debugging = False
+
+
+def git_debugging(debugging=None):
+    global _git_debugging
+    current_debugging = _git_debugging
+    if debugging is not None:
+        _git_debugging = debugging
+    return current_debugging
 
 
 def exec_output(command, require_output):
@@ -118,6 +154,10 @@ def exec_output(command, require_output):
     output = None
     error = None
     ret = -1
+
+    if _git_debugging:
+        print('exec_output(%s)' % ' '.join(command))
+
     try:
         ret, output, error = run_program(command)
     except Exception as e:
@@ -128,15 +168,16 @@ def exec_output(command, require_output):
 
     output_str = decode_to_str(output) if output is not None else ''
     error_str = decode_to_str(error) if error is not None else ''
+    exec_result = ExecResult(command, ret, output_str, error_str)
 
     if exception is not None:
-        format_error(' '.join(command), ret, output_str, error_str)
+        format_error(exec_result)
         raise exception
 
-    return ret, output_str, error_str
+    return exec_result
 
 
-def exec_output_lines(command, require_output):
+def exec_output_lines(command, require_output, separator=None):
     """Executes `command` which is a list of strings. If `require_output` is True then raise an
         exception is there is no stdout.
         Returns: ret, output_str, error_str
@@ -144,9 +185,12 @@ def exec_output_lines(command, require_output):
             output_lines: stdout of the child process as a list of strings, one string per line
             error_str: stderr of the child process as a string
     """
-    ret, output_str, error_str = exec_output(command, require_output)
-    output_lines = output_str.splitlines()
-    return ret, output_lines, error_str
+    exec_result = exec_output(command, require_output)
+    if separator is not None:
+        output_lines = exec_result.out.split(separator)
+    else:
+        output_lines = exec_result.out.splitlines()
+    return output_lines, exec_result
 
 
 def exec_headline(command):
@@ -157,8 +201,24 @@ def exec_headline(command):
             output_line: he first line stdout of the child process.
             error_str: stderr of the child process as a string
     """
-    ret, output_lines, error_str = exec_output_lines(command, True)
-    return ret, output_lines[0], error_str
+    output_lines, exec_result = exec_output_lines(command, True)
+    return output_lines[0], exec_result
+
+
+def git_config_set(key, value):
+    return exec_output(['git', 'config', key, value], False)
+
+
+def git_config_unset(key):
+    return exec_output(['git', 'config', '--unset', key], False)
+
+
+def git_reset(obj, hard=True):
+    command = ['git', 'reset']
+    if hard:
+        command.append('--hard')
+    command.append(obj)
+    return exec_output(command, False)
 
 
 def git_file_list(path_patterns=()):
@@ -188,11 +248,38 @@ def git_diff(rev1, rev2):
     return exec_output_lines(['git', 'diff', '--name-only', rev1, rev2], False)
 
 
-def git_show(obj=None):
+def git_log(pattern):
+    """Returns: List of commits in ancestors of current git revision with commit messages matching
+        `pattern`.
+        This is basically git log --grep=<pattern>.
+    """
+    # git ls-files -z returns a '\0' separated list of files terminated with '\0\0'
+    command = ['git', 'log', '-z',
+     '--perl-regexp',
+     # '--grep="%s"' % pattern
+     "--grep='%s'" % pattern
+    ]
+
+    bin_list, exec_result = exec_output_lines(command, False, '\0')
+    print('bin_list=%d' % len(bin_list))
+    print(exec_result)
+
+    commit_list = []
+    for commit in bin_list:
+        if not commit:
+            break
+        commit_list.append(commit)
+
+    return commit_list, exec_result
+
+
+def git_show(obj=None, quiet=False):
     """Returns: Description of a git object `obj`, which is typically a commit.
         https://git-scm.com/docs/git-show
     """
-    command = ['git', 'show', ]
+    command = ['git', 'show']
+    if quiet:
+        command.append('--quiet')
     if obj is not None:
         command.append(obj)
 
@@ -226,16 +313,15 @@ if False:
     assert False
 
 
-def git_date(obj):
-    """Returns: Date of a git object `obj`, which is typically a commit.
-        NOTE: The returned date is standardized to timezone TIMEZONE.
-    """
-    date_s = exec_headline(['git', 'show', '--pretty=format:%ai', '--quiet', obj])
-    return to_timestamp(date_s)
+# def git_date(obj):
+#     """Returns: Date of a git object `obj`, which is typically a commit.
+#         NOTE: The returned date is standardized to timezone TIMEZONE.
+#     """
+#     date_s = exec_headline(['git', 'show', '--pretty=format:%ai', '--quiet', obj])
+#     return to_timestamp(date_s)
 
 
 RE_REMOTE_URL = re.compile(r'(https?://.*/[^/]+(?:\.git)?)\s+\(fetch\)')
-
 RE_REMOTE_NAME = re.compile(r'https?://.*/(.+?)(\.git)?$')
 
 
@@ -247,7 +333,7 @@ def git_remote():
     # origin  https://github.com/FFTW/fftw3.git (push)
 
     try:
-        output_lines = exec_output_lines(['git', 'remote', '-v'], True)
+        output_lines, exec_result = exec_output_lines(['git', 'remote', '-v'], True)
     except Exception as e:
         print('git_remote error: %s' % e)
         return None, None
@@ -278,10 +364,10 @@ def git_name():
 def git_current_branch():
     """Returns: git name of current branch or None if there is no current branch (detached HEAD).
     """
-    branch = exec_headline(['git', 'rev-parse', '--abbrev-ref', 'HEAD'])
+    branch, exec_result = exec_headline(['git', 'rev-parse', '--abbrev-ref', 'HEAD'])
     if branch == 'HEAD':  # Detached HEAD?
         branch = None
-    return branch
+    return branch, exec_result
 
 
 def git_current_revision():
@@ -307,10 +393,17 @@ RE_REMOTE = re.compile(r'origin/(.*?)\s*$')
 RE_LOCAL = re.compile(r'\*?\s*(.*?)\s*$')
 
 
-def git_track_all():
+def git_track_all(delete_local):
+    """Track all remote branches
+        If `delete_local` is True then delete all local branches (except checked out branch)
+        before tracking.
+        Returns: local_branches, exec_result
+            local_branches: List of local branches with remotes
+            exec_result: Result of exec_output()
+    """
 
-    ret, local_branches0, err = exec_output_lines(['git', 'branch'], False)
-    assert ret == 0, (ret, err)
+    local_branches0, exec_result = exec_output_lines(['git', 'branch'], False)
+    assert exec_result.ret == 0, format_error(exec_result)
     local_branches = set()
     for i, local in enumerate(local_branches0):
         m = RE_LOCAL.search(local)
@@ -318,8 +411,21 @@ def git_track_all():
         local = m.group(1)
         local_branches.add(local)
 
-    ret, remote_branches0, err = exec_output_lines(['git', 'branch', '-r'], False)
-    assert ret == 0, (ret, err)
+    current_branch, exec_result = git_current_branch()
+    assert exec_result.ret == 0, format_error(exec_result)
+
+    if delete_local:
+        removed_branches = set()
+        for local in local_branches:
+            if local == current_branch:
+                continue
+            exec_result = exec_output(['git', 'branch', '-D', local], False)
+            assert exec_result.ret == 0, format_error(exec_result)
+            removed_branches.add(local)
+        local_branches -= removed_branches
+
+    remote_branches0, exec_result = exec_output_lines(['git', 'branch', '-r'], False)
+    assert exec_result.ret == 0, format_error(exec_result)
 
     local_remote = {}
     for i, remote in enumerate(remote_branches0):
@@ -340,19 +446,22 @@ def git_track_all():
 
         print('%3d: Tracking "%s" from "%s"' % (i, local, remote))
 
-        ret, out, err = exec_output(['git', 'branch', '--track', local], False)
-        if ret != 0:
+        exec_result = exec_output(['git', 'branch', '--track', local], False)
+        if exec_result.ret != 0:
             print('Could not track remote branch local="%s",remote="%s"' % (local, remote))
-        assert ret == 0, (i, remote, ret, out, err)
+        assert exec_result.ret == 0, format_error(exec_result)
         local_branches.add(local)
 
-    return ret, local_branches, err
+    # Only interested in branches that have a remote
+    local_branches = {local: remote for local in local_branches if local in local_remote}
+
+    return local_branches, exec_result
 
 
 def git_fetch():
     """
     """
-    return exec_output(['git', 'fetch', '--all', '--tags', '--prune'], False)
+    return exec_output(['git', 'fetch', '--all', '--tags', '--prune', '--force'], False)
 
 
 def git_checkout(branch):
@@ -361,99 +470,27 @@ def git_checkout(branch):
     return exec_output(['git', 'checkout', branch], False)
 
 
+def _find_conflicts(out_lines):
+    return [line for line in out_lines if line.startswith('CONFLICT')]
+
+
 def git_pull(branch):
     """
     """
-    ret, out_lines, err = exec_output(['git', 'pull', 'origin', branch], False)
-    if ret != 0:
-        for line in out_lines:
-            if line.startswith('CONFLICT'):
-                print(line)
-    return ret, out_lines, err
+    out_lines, exec_result = exec_output_lines(['git', 'pull', '--force', '--ff', 'origin', branch],
+                                               False)
+    return _find_conflicts(out_lines), out_lines, exec_result
+
+
+def git_push(branch):
+    """
+    """
+    assert False, branch
+    return exec_output(['git', 'push', 'origin', branch], False)
 
 
 def git_merge(branch):
     """
     """
-    ret, out_lines, err = exec_output(['git', 'merge', branch], False)
-    if ret != 0:
-        for line in out_lines:
-            if line.startswith('CONFLICT'):
-                print(line)
-    return ret, out_lines, err
-
-
-def border(name):
-    return '%s: %s' % (name, (78 - len(name)) * '^')
-
-BORDER = 80 * '^'
-
-
-
-
-
-def merge_branches(whence, whither):
-    print('merge_branches: %s -> %s' % (whence, whither))
-
-    ret, sha_before, err = git_show_sha()
-    assert ret == 0, format_error('git_show_sha', ret, sha_before, err)
-
-    ret, branch_list, err = git_track_all()
-    assert whither in branch_list, 'To branch "%s" not in branches %s' % (whither, sorted(branch_list))
-    assert whence in branch_list, 'From branch "%s" not in branches %s' % (whence, sorted(branch_list))
-
-    ret, out, err = git_fetch()
-    assert ret == 0, format_error('git_fetch', ret, out, err)
-    ret, out, err = git_checkout(whither)
-    assert ret == 0, format_error('git_checkout', ret, out, err)
-    ret, out, err = git_pull(whither)
-    assert ret == 0, format_error('git_pull', ret, out, err)
-    ret, out, err = git_merge(whence)
-    assert ret == 0, format_error('git_merge', ret, out, err)
-
-
-    ret, sha_after, err = git_show_sha()
-    assert ret == 0, format_error('git_show_sha', ret, sha_after, err)
-
-    print(',' * 80)
-    print('sha_before=%s' % sha_before)
-    print('sha_after =%s' % sha_after)
-    print('.' * 80)
-    if sha_before == sha_after:
-        print('No change')
-    else:
-        ret, info, err = git_show()
-        print(info)
-
-
-    # CONFLICT (content): Merge conflict in server/src/java/biz/papercut/pcng/ext/device/ExtDeviceConfigOption.java
-
-
-def main():
-    import optparse
-
-    lowpriority()
-
-    parser = optparse.OptionParser('python ' + sys.argv[0] + ' [options] [<directory>]')
-    # parser.add_option('-c', '--code-only', action='store_true', default=False, dest='code_only',
-    #                   help='Show only code files')
-    # parser.add_option('-f', '--force', action='store_true', default=False, dest='force',
-    #                   help='Force running git blame over source code')
-    # parser.add_option('-s', '--show', action='store_true', default=False, dest='do_show',
-    #                   help='Pop up graphs as we go')
-    # parser.add_option('-a', '--authors', dest='author_pattern', default=None,
-    #                   help='Analyze only code with these authors')
-    parser.add_option('-t', '--to', dest='whither', default='develop',
-                      help='Branch to merge to')
-    parser.add_option('-f', '--from', dest='whence', default='release/v15.3',
-                      help='Branch to merge from')
-
-    options, _ = parser.parse_args()
-
-    print(__doc__)
-    merge_branches(options.whence, options.whither)
-
-if __name__ == '__main__':
-
-    main()
-    print()
+    out_lines, exec_result = exec_output_lines(['git', 'merge', branch], False)
+    return _find_conflicts(out_lines), out_lines, exec_result
