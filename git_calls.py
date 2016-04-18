@@ -10,10 +10,9 @@ import time
 import re
 import os
 from collections import namedtuple
+from pandas import Timestamp
+from utils import Commit
 
-
-# Python 2 / 3 stuff
-PY2 = sys.version_info[0] < 3
 try:
     reload(sys)
     sys.setdefaultencoding('utf-8')
@@ -67,6 +66,13 @@ def truncate_sha(sha):
     return sha[:SHA_LEN]
 
 
+def to_timestamp(date_s):
+    """Convert string `date_s' to pandas Timestamp in `TIMEZONE`
+        NOTE: The idea is to get all times in one timezone.
+    """
+    return Timestamp(date_s).tz_convert(TIMEZONE)
+
+
 concat = ''.join
 path_join = os.path.join
 
@@ -83,11 +89,6 @@ def decode_to_str(bytes):
 
 
 def run_program(command, async_timeout=60.0):
-    # r = subprocess.run(command)
-    # print('$' * 80)
-    # print(r)
-    # for a in r.args:
-    #     print(a)
     ps = subprocess.Popen(command,
                           # shell=True
                           stdout=subprocess.PIPE,
@@ -101,7 +102,6 @@ def run_program(command, async_timeout=60.0):
         if ret is not None or time.time() <= t0 + async_timeout:
             break
         time.sleep(1.0)
-
 
     return ret, out, err
 
@@ -120,6 +120,8 @@ def format_error(exec_result, name=None, failure=None):
     assert isinstance(ret, int), (ret, type(ret))
 
     if name is None:
+        # print('-' * 80)
+        # print(command)
         name = ' '.join(command)
 
     summary = '%s: ret=%d,out=%d,err=%d' % (name, ret, len(out), len(err))
@@ -140,6 +142,66 @@ def git_debugging(debugging=None):
     if debugging is not None:
         _git_debugging = debugging
     return current_debugging
+
+
+test_commit = """
+commit 66270d2f85404a3425917c1906a418ead6d2cf0e
+Author: Smita Khanzo <smita.khanzode@papercut.com>
+Date:   Wed Mar 2 11:40:00 2016 +1100
+
+    PC-8368: Reverting the temporary change that was made for the test build.
+
+    Hello there
+
+"""
+
+RE_LOG_ENTRY = re.compile(r'''
+    commit\s+(?P<sha>[a-f0-9]{40})\s*\n
+    (?:Merge:\s*(?P<merge1>[a-f0-9]+)\s+(?P<merge2>[a-f0-9]+)\s*\n)?
+    Author:\s*(?P<author>.*?)\s*\n
+    Date:\s*(?P<date>.*?)\s*\n
+    \s*(?P<body>.*)\s*
+    $
+    ''', re.VERBOSE | re.DOTALL | re.MULTILINE)
+
+RE_AUTHOR = re.compile(r'<([^@]+@[^@]+)>')
+
+# !@#$ Move to caller
+AUTHOR_ALIASES = {
+    'danielt@papercutsoftware.com':  'daniel.toursouni@papercut.com',
+    'geoff@laptop-geoff.papercutsoftware.com': 'geoff.smith@papercut.com',
+    'peter.williams@papercut.cm': 'peter.williams@papercut.com',
+}
+
+
+def extract_commit(text, issue_extractor):
+    assert issue_extractor is None or callable(issue_extractor)
+    m = RE_LOG_ENTRY.search(text)
+    assert m, text[:1000]
+    # print(m.groups())
+    d = m.groupdict()
+    n = RE_AUTHOR.search(d['author'])
+    assert n, d['author']
+    author = n.group(1).lower()
+    d['author'] = AUTHOR_ALIASES.get(author, author)
+    d['date'] = to_timestamp(d['date'])
+    d['body'] = d['body'].strip()
+    d['issue'] = issue_extractor(d['body'])
+
+    commit = Commit(**d)
+    return commit
+
+
+if False:
+    from pprint import pprint
+    m = RE_LOG_ENTRY.search(test_commit)
+    print(m.groups())
+    pprint(m.groupdict())
+    commit = extract_commit(test_commit)
+    pprint(commit)
+    for x in commit:
+        print(type(x), x)
+    assert False
 
 
 def exec_output(command, require_output):
@@ -186,10 +248,18 @@ def exec_output_lines(command, require_output, separator=None):
             error_str: stderr of the child process as a string
     """
     exec_result = exec_output(command, require_output)
-    if separator is not None:
-        output_lines = exec_result.out.split(separator)
-    else:
-        output_lines = exec_result.out.splitlines()
+    if separator is None:
+        separator = '\n'
+    output_lines = exec_result.out.split(separator)
+
+    # if separator is not None:
+    #     output_lines = exec_result.out.split(separator)
+    # else:
+    #     output_lines = exec_result.out.splitlines()
+    assert output_lines, format_error(exec_result)
+    while output_lines and not output_lines[-1]:
+        # print(len(output_lines), output_lines[-1])
+        output_lines.pop()
     return output_lines, exec_result
 
 
@@ -228,6 +298,27 @@ def git_file_list(path_patterns=()):
     return exec_output_lines(['git', 'ls-files', '--exclude-standard'] + path_patterns, False)
 
 
+def git_commit_file_list(sha):
+    """
+        git diff-tree --no-commit-id --name-only -r
+    """
+    command = ['git', 'diff-tree', '--no-commit-id', '--name-only', '-r', '-M', sha]
+    return exec_output_lines(command, False)
+
+
+def git_diff_lines(treeish, path):
+    """
+        treeish: A git tree-ish id, typically a commit id
+        path: Path to a file
+        Returns: patch for diff of blob specified by (`treeish`, `path`) and its parent
+
+        This is basically
+         git diff-tree -p e3eb9aa88741ee250defa1bcd43e6b2385f556b1 -- providers/airprint/mac/airprint.c
+    """
+    command = ['git', 'diff-tree', '-p', '--full-index',  treeish, '--', path]
+    return exec_output_lines(command, False)
+
+
 def git_pending_list(path_patterns=()):
     """Returns: List of git pending files matching `path_patterns`.
     """
@@ -248,7 +339,7 @@ def git_diff(rev1, rev2):
     return exec_output_lines(['git', 'diff', '--name-only', rev1, rev2], False)
 
 
-def git_log(pattern):
+def git_log(pattern=None, inclusions=None, exclusions=None):
     """Returns: List of commits in ancestors of current git revision with commit messages matching
         `pattern`.
         This is basically git log --grep=<pattern>.
@@ -257,33 +348,55 @@ def git_log(pattern):
     command = ['git', 'log', '-z',
      '--perl-regexp',
      # '--grep="%s"' % pattern
-     "--grep='%s'" % pattern
+     '--no-merges'
     ]
+    if pattern:
+        command.append("--grep='%s'" % pattern)
+    if inclusions:
+        command.extend(inclusions)
+    if exclusions:
+        command.extend(['^%s' % obj for obj in exclusions])
 
     bin_list, exec_result = exec_output_lines(command, False, '\0')
     print('bin_list=%d' % len(bin_list))
-    print(exec_result)
+    # print(exec_result)
 
     commit_list = []
     for commit in bin_list:
         if not commit:
             break
         commit_list.append(commit)
+    assert commit_list
 
     return commit_list, exec_result
+
+
+def git_log_extract(issue_extractor, pattern=None, inclusions=None, exclusions=None):
+    assert issue_extractor is None or callable(issue_extractor)
+    entry_list, exec_result = git_log(pattern, inclusions, exclusions)
+    return [extract_commit(entry, issue_extractor) for entry in entry_list], exec_result
 
 
 def git_show(obj=None, quiet=False):
     """Returns: Description of a git object `obj`, which is typically a commit.
         https://git-scm.com/docs/git-show
     """
+    if obj is not None:
+        assert isinstance(obj, str), obj
     command = ['git', 'show']
     if quiet:
         command.append('--quiet')
     if obj is not None:
         command.append(obj)
 
-    return exec_output(command, True)
+    return exec_output_lines(command, True)
+
+
+def git_show_extract(issue_extractor, obj=None):
+    assert issue_extractor is None or callable(issue_extractor)
+    lines, exec_result = git_show(obj=obj, quiet=True)
+    text = '\n'.join(lines)
+    return extract_commit(text, issue_extractor), exec_result
 
 
 def git_show_oneline(obj=None):
@@ -464,10 +577,14 @@ def git_fetch():
     return exec_output(['git', 'fetch', '--all', '--tags', '--prune', '--force'], False)
 
 
-def git_checkout(branch):
+def git_checkout(branch, force=False):
     """
     """
-    return exec_output(['git', 'checkout', branch], False)
+    command = ['git', 'checkout']
+    if force:
+        command.append('--force')
+    command.append(branch)
+    return exec_output(command, False)
 
 
 def _find_conflicts(out_lines):
