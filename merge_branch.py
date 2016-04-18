@@ -73,9 +73,9 @@ def merge_branches(whence, whither, do_push, clean_branches, debugging):
 
     # We can only merge to and from branches that exist
     check_error(whither in branch_list,
-                'To branch "%s" not in branches %s' % (whither, '\n'.join(sorted(branch_list))))
+                'To branch "%s" not in branches\n%s' % (whither, '\n'.join(sorted(branch_list))))
     check_error(whence in branch_list,
-                'From branch "%s" not in branches %s' % (whence, '\n'.join(sorted(branch_list))))
+                'From branch "%s" not in branches\n%s' % (whence, '\n'.join(sorted(branch_list))))
 
     #
     # fetch (above), checkout and pull to make working directory match origin latest
@@ -124,6 +124,24 @@ def merge_branches(whence, whither, do_push, clean_branches, debugging):
     # check_error(exec_result.ret == 0, format_error(exec_result))
 
 
+def merge_up(branch_list, do_push, clean_branches, debugging):
+    """Merge branches in `branch_list` "up" i.e. from first element to last
+        e.g. for brach_list = [b, b2, b3]
+             merge b1 -> b2 then
+             merge b2 -> b3
+
+        Terminate on first failure
+    """
+    print('Merging:\n%s' % ' ->\n'.join('%4d: "%s"' % (i, b) for i, b in enumerate(branch_list)))
+
+    merge_list = list(zip(branch_list[:-1], branch_list[1:]))
+    print('Planned merges:\n%s' %
+          '\n'.join('%4d: "%s" -> "%s"' % (i, b1, b2) for i, (b1, b2) in enumerate(merge_list)))
+
+    for i, (b1, b2) in enumerate(zip(branch_list[:-1], branch_list[1:])):
+        merge_branches(b1, b2, do_push, clean_branches, debugging)
+
+
 def main():
     import optparse
 
@@ -141,11 +159,19 @@ def main():
                       help='Branch to merge to')
     parser.add_option('-f', '--from', dest='whence', default='',
                       help='Branch to merge from')
+    parser.add_option('-u', '--up', dest='branch_list_str', default='',
+                      help='Branch to merge to')
 
     options, _ = parser.parse_args()
 
-    merge_branches(options.whence, options.whither, options.do_push, options.clean_branches,
-                   options.debugging)
+    if options.branch_list_str:
+        assert not (options.whence or options.whither), '--up cannot be used with --to and --from'
+        branch_list = options.branch_list_str.split()
+        merge_up(branch_list, options.do_push, options.clean_branches, options.debugging)
+    else:
+        merge_branches(options.whence, options.whither, options.do_push, options.clean_branches,
+                       options.debugging)
+
 
 if __name__ == '__main__':
 
