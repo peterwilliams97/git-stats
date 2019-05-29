@@ -168,8 +168,6 @@ RE_AUTHOR = re.compile(r'<([^@]+@[^@]+)>')
 
 # !@#$ Move to caller
 AUTHOR_ALIASES = {
-    'danielt@papercutsoftware.com':  'daniel.toursouni@papercut.com',
-    'geoff@laptop-geoff.papercutsoftware.com': 'geoff.smith@papercut.com',
     'peter.williams@papercut.cm': 'peter.williams@papercut.com',
 }
 
